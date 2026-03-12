@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="768" height="64" viewBox="0 0 768 64">
+  <defs>
+    <g id="tile-road">
+      <polygon points="64,0 128,32 64,64 0,32" fill="#1b2733"/>
+      <polygon points="64,6 118,32 64,42 10,32" fill="#355469" fill-opacity=".35"/>
+      <path d="M64 10 L108 32 L64 54" stroke="#73dfff" stroke-opacity=".22" stroke-width="3" fill="none"/>
+    </g>
+    <g id="tile-sidewalk">
+      <polygon points="64,0 128,32 64,64 0,32" fill="#2a3946"/>
+      <polygon points="64,6 118,32 64,44 10,32" fill="#52697c" fill-opacity=".35"/>
+      <path d="M16 32 L64 10 L112 32" stroke="#d9f6ff" stroke-opacity=".1" stroke-width="2" fill="none"/>
+    </g>
+    <g id="tile-plaza">
+      <polygon points="64,0 128,32 64,64 0,32" fill="#253543"/>
+      <polygon points="64,7 118,32 64,45 10,32" fill="#456479" fill-opacity=".28"/>
+    </g>
+    <g id="tile-lab">
+      <polygon points="64,0 128,32 64,64 0,32" fill="#30404b"/>
+      <polygon points="64,6 118,32 64,42 10,32" fill="#62819b" fill-opacity=".36"/>
+      <path d="M20 32 L64 10 L108 32" stroke="#9defff" stroke-opacity=".18" stroke-width="3" fill="none"/>
+    </g>
+    <g id="tile-industrial">
+      <polygon points="64,0 128,32 64,64 0,32" fill="#332c2c"/>
+      <polygon points="64,6 118,32 64,44 10,32" fill="#6d5449" fill-opacity=".34"/>
+      <path d="M18 32 L64 10 L110 32" stroke="#f3c087" stroke-opacity=".16" stroke-width="2" fill="none"/>
+    </g>
+    <g id="tile-hazard">
+      <polygon points="64,0 128,32 64,64 0,32" fill="#3a3024"/>
+      <polygon points="64,6 118,32 64,44 10,32" fill="#836438" fill-opacity=".34"/>
+      <path d="M28 40 L52 26 L76 40 L100 26" stroke="#ffb246" stroke-opacity=".45" stroke-width="4" fill="none"/>
+    </g>
+  </defs>
+  <use href="#tile-road" x="0"/>
+  <use href="#tile-sidewalk" x="128"/>
+  <use href="#tile-plaza" x="256"/>
+  <use href="#tile-lab" x="384"/>
+  <use href="#tile-industrial" x="512"/>
+  <use href="#tile-hazard" x="640"/>
+</svg>
