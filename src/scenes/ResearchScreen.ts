@@ -13,24 +13,26 @@ const renderUpgradeCards = (
     .map((upgrade) => {
       const isUnlocked = unlocked.includes(upgrade.id);
       const affordable = credits >= upgrade.cost;
+      const actionLabel = isUnlocked
+        ? "Unlocked"
+        : affordable
+          ? "Purchase"
+          : "Need";
       return `
         <article class="upgrade-card${isUnlocked ? " upgrade-card--owned" : ""}">
-          <div class="upgrade-card__header">
-            <div>
-              <p class="eyebrow">${upgrade.category}</p>
-              <h3>${upgrade.name}</h3>
-            </div>
-            <span class="resource-pill">${upgrade.cost} cr</span>
-          </div>
-          <p>${upgrade.description}</p>
-          <p class="muted">${upgrade.effectText}</p>
           <button
-            class="button ${isUnlocked ? "button--ghost" : affordable ? "button--primary" : ""}"
+            class="button upgrade-card__button ${isUnlocked ? "button--ghost" : affordable ? "button--primary" : ""}"
             data-upgrade="${prefix}:${upgrade.id}"
             ${isUnlocked || !affordable ? "disabled" : ""}
           >
-            ${isUnlocked ? "Unlocked" : affordable ? "Purchase" : "Insufficient Credits"}
+            <span class="button__label">${actionLabel}</span>
+            ${isUnlocked ? "" : `<span class="upgrade-card__button-cost">${upgrade.cost} cr</span>`}
           </button>
+          <div class="upgrade-card__body">
+            <h3 class="upgrade-card__title">${upgrade.name}</h3>
+            <p class="upgrade-card__summary">${upgrade.description}</p>
+            <p class="muted upgrade-card__effect">${upgrade.effectText}</p>
+          </div>
         </article>
       `;
     })
@@ -54,18 +56,18 @@ export class ResearchScreen implements Screen {
     container.innerHTML = `
       <section class="screen screen--research">
         <header class="screen-header">
-          <div>
+          <div class="screen-header__copy research-header__copy">
             <p class="eyebrow">R&D and cybernetics</p>
             <h1>Upgrade lattice</h1>
-            <p>Spend field credits on team-wide research and cybernetic tuning that persists across missions.</p>
+            <p class="screen-copy">Spend field credits on persistent research and cyber tuning for the whole squad.</p>
           </div>
           <div class="header-actions">
-            <span class="resource-pill">${formatCredits(state.credits)}</span>
-            <button class="button button--ghost" data-action="back">Back</button>
+            <span class="resource-pill"><span class="resource-pill__value">${formatCredits(state.credits)}</span></span>
+            <button class="button button--ghost" data-action="back"><span class="button__label">Back</span></button>
           </div>
         </header>
         <div class="upgrade-columns">
-          <div>
+          <div class="upgrade-column">
             <h2>Research</h2>
             <div class="upgrade-grid">
               ${renderUpgradeCards(
@@ -76,7 +78,7 @@ export class ResearchScreen implements Screen {
               )}
             </div>
           </div>
-          <div>
+          <div class="upgrade-column">
             <h2>Cyber Upgrades</h2>
             <div class="upgrade-grid">
               ${renderUpgradeCards(

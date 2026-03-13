@@ -2,6 +2,8 @@ import type { SettingsState, WeaponId } from "../data/types";
 
 type MusicMode = "menu" | "mission" | "silent";
 
+const MUSIC_ENABLED = false;
+
 const clamp = (value: number, min = 0, max = 1): number =>
   Math.min(max, Math.max(min, value));
 
@@ -18,6 +20,8 @@ export class AudioDirector {
 
   private musicNodes: AudioNode[] = [];
 
+  private musicMasterGain: GainNode | null = null;
+
   public touch(): void {
     if (!this.context) {
       this.context = new AudioContext();
@@ -27,7 +31,7 @@ export class AudioDirector {
       void this.context.resume();
     }
 
-    if (!this.musicNodes.length && this.musicMode !== "silent") {
+    if (MUSIC_ENABLED && !this.musicNodes.length && this.musicMode !== "silent") {
       this.startMusic(this.musicMode);
     }
   }
@@ -37,12 +41,22 @@ export class AudioDirector {
     this.musicVolume = clamp(settings.musicVolume);
     this.sfxVolume = clamp(settings.sfxVolume);
 
-    if (this.musicNodes.length) {
-      this.startMusic(this.musicMode);
+    if (!MUSIC_ENABLED) {
+      this.stopMusic();
+      return;
     }
+
+    this.updateMusicGain();
   }
 
   public setMusicMode(mode: MusicMode): void {
+    if (!MUSIC_ENABLED) {
+      this.musicMode = "silent";
+      this.stopMusic();
+      return;
+    }
+
+    const modeChanged = this.musicMode !== mode;
     this.musicMode = mode;
 
     if (mode === "silent") {
@@ -51,6 +65,11 @@ export class AudioDirector {
     }
 
     if (!this.context) {
+      return;
+    }
+
+    if (!modeChanged && this.musicNodes.length) {
+      this.updateMusicGain();
       return;
     }
 
@@ -72,9 +91,25 @@ export class AudioDirector {
     this.playTone(560, 0.07, "sine", 0.12, 0.02);
   }
 
-  public playImpact(): void {
-    this.playTone(90, 0.09, "sawtooth", 0.14);
-    this.playTone(180, 0.04, "triangle", 0.08, 0.02);
+  public playImpact(weaponId?: WeaponId): void {
+    switch (weaponId) {
+      case "breach-12":
+      case "machine-gun":
+      case "enemy-suppressor":
+      case "anti-materiel-rifle":
+        this.playTone(82, 0.12, "sawtooth", 0.18);
+        this.playTone(148, 0.06, "triangle", 0.1, 0.02);
+        return;
+      case "sniper-rifle":
+      case "battle-rifle":
+      case "enemy-lancer":
+        this.playTone(118, 0.09, "square", 0.14);
+        this.playTone(244, 0.04, "triangle", 0.08, 0.015);
+        return;
+      default:
+        this.playTone(90, 0.09, "sawtooth", 0.14);
+        this.playTone(180, 0.04, "triangle", 0.08, 0.02);
+    }
   }
 
   public playExplosion(): void {
@@ -95,19 +130,46 @@ export class AudioDirector {
 
   public playWeapon(weaponId: WeaponId): void {
     switch (weaponId) {
-      case "pistol":
-        this.playTone(220, 0.05, "square", 0.18);
+      case "colt":
+      case "enemy-sidearm":
+        this.playTone(240, 0.045, "square", 0.16);
+        this.playTone(420, 0.02, "triangle", 0.06, 0.01);
         break;
-      case "smg":
-        this.playTone(250, 0.04, "sawtooth", 0.14);
+      case "uiz":
+      case "enemy-needler":
+        this.playTone(286, 0.035, "sawtooth", 0.13);
+        this.playTone(420, 0.02, "triangle", 0.05, 0.01);
         break;
-      case "shotgun":
+      case "pdw-90":
+        this.playTone(310, 0.04, "triangle", 0.14);
+        this.playTone(460, 0.025, "sine", 0.07, 0.01);
+        break;
+      case "breach-12":
         this.playTone(140, 0.12, "square", 0.26);
         this.playTone(70, 0.1, "triangle", 0.16, 0.02);
         break;
-      case "rifle":
-        this.playTone(200, 0.07, "sawtooth", 0.18);
-        this.playTone(320, 0.03, "square", 0.08, 0.02);
+      case "assault-rifle":
+      case "enemy-carbine":
+        this.playTone(210, 0.065, "sawtooth", 0.18);
+        this.playTone(340, 0.03, "square", 0.09, 0.02);
+        break;
+      case "battle-rifle":
+      case "enemy-lancer":
+        this.playTone(176, 0.09, "square", 0.2);
+        this.playTone(290, 0.04, "triangle", 0.08, 0.018);
+        break;
+      case "sniper-rifle":
+        this.playTone(126, 0.14, "square", 0.28);
+        this.playTone(210, 0.07, "triangle", 0.12, 0.02);
+        break;
+      case "machine-gun":
+      case "enemy-suppressor":
+        this.playTone(172, 0.055, "sawtooth", 0.17);
+        this.playTone(110, 0.08, "triangle", 0.09, 0.01);
+        break;
+      case "anti-materiel-rifle":
+        this.playTone(96, 0.18, "square", 0.32);
+        this.playTone(164, 0.08, "triangle", 0.14, 0.02);
         break;
     }
   }
@@ -121,41 +183,82 @@ export class AudioDirector {
 
     const now = this.context.currentTime;
     const masterGain = this.context.createGain();
-    masterGain.gain.value = this.masterVolume * this.musicVolume * 0.18;
+    masterGain.gain.setValueAtTime(0.0001, now);
+    masterGain.gain.linearRampToValueAtTime(this.getMusicGainValue(), now + 0.45);
     masterGain.connect(this.context.destination);
 
-    const low = this.context.createOscillator();
-    low.type = "triangle";
-    low.frequency.value = mode === "menu" ? 62 : 74;
+    const filter = this.context.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = mode === "menu" ? 320 : 420;
+    filter.Q.value = 0.6;
+    filter.connect(masterGain);
 
-    const lowGain = this.context.createGain();
-    lowGain.gain.value = 0.6;
-    low.connect(lowGain);
-    lowGain.connect(masterGain);
+    const sub = this.context.createOscillator();
+    sub.type = "sine";
+    sub.frequency.value = mode === "menu" ? 46 : 54;
 
-    const high = this.context.createOscillator();
-    high.type = "sawtooth";
-    high.frequency.value = mode === "menu" ? 124 : 148;
+    const subGain = this.context.createGain();
+    subGain.gain.value = mode === "menu" ? 0.52 : 0.42;
+    sub.connect(subGain);
+    subGain.connect(filter);
 
-    const highGain = this.context.createGain();
-    highGain.gain.value = 0.18;
-    high.connect(highGain);
-    highGain.connect(masterGain);
+    const body = this.context.createOscillator();
+    body.type = "triangle";
+    body.frequency.value = mode === "menu" ? 92 : 108;
 
-    const lfo = this.context.createOscillator();
-    lfo.type = "sine";
-    lfo.frequency.value = mode === "menu" ? 0.14 : 0.24;
+    const bodyGain = this.context.createGain();
+    bodyGain.gain.value = mode === "menu" ? 0.2 : 0.24;
+    body.connect(bodyGain);
+    bodyGain.connect(filter);
 
-    const lfoGain = this.context.createGain();
-    lfoGain.gain.value = mode === "menu" ? 5 : 8;
-    lfo.connect(lfoGain);
-    lfoGain.connect(low.frequency);
+    const shimmer = this.context.createOscillator();
+    shimmer.type = "sine";
+    shimmer.frequency.value = mode === "menu" ? 184 : 216;
 
-    low.start(now);
-    high.start(now);
-    lfo.start(now);
+    const shimmerGain = this.context.createGain();
+    shimmerGain.gain.value = mode === "menu" ? 0.025 : 0.04;
+    shimmer.connect(shimmerGain);
+    shimmerGain.connect(filter);
 
-    this.musicNodes = [low, high, lfo, masterGain, lowGain, highGain, lfoGain];
+    const drift = this.context.createOscillator();
+    drift.type = "sine";
+    drift.frequency.value = mode === "menu" ? 0.09 : 0.16;
+
+    const driftGain = this.context.createGain();
+    driftGain.gain.value = mode === "menu" ? 3.5 : 5;
+    drift.connect(driftGain);
+    driftGain.connect(body.frequency);
+
+    const shimmerPulse = this.context.createOscillator();
+    shimmerPulse.type = "triangle";
+    shimmerPulse.frequency.value = mode === "menu" ? 0.22 : 0.34;
+
+    const shimmerPulseGain = this.context.createGain();
+    shimmerPulseGain.gain.value = mode === "menu" ? 0.012 : 0.02;
+    shimmerPulse.connect(shimmerPulseGain);
+    shimmerPulseGain.connect(shimmerGain.gain);
+
+    sub.start(now);
+    body.start(now);
+    shimmer.start(now);
+    drift.start(now);
+    shimmerPulse.start(now);
+
+    this.musicMasterGain = masterGain;
+    this.musicNodes = [
+      sub,
+      body,
+      shimmer,
+      drift,
+      shimmerPulse,
+      masterGain,
+      filter,
+      subGain,
+      bodyGain,
+      shimmerGain,
+      driftGain,
+      shimmerPulseGain
+    ];
   }
 
   private stopMusic(): void {
@@ -164,12 +267,19 @@ export class AudioDirector {
         try {
           node.stop();
         } catch {
-          return;
+          // Ignore duplicate stop attempts during rapid screen changes.
         }
+      }
+
+      try {
+        node.disconnect();
+      } catch {
+        // Some nodes may already be disconnected.
       }
     });
 
     this.musicNodes = [];
+    this.musicMasterGain = null;
   }
 
   private playTone(
@@ -200,5 +310,25 @@ export class AudioDirector {
     gain.connect(this.context.destination);
     oscillator.start(now);
     oscillator.stop(now + duration + 0.02);
+  }
+
+  private getMusicGainValue(): number {
+    return Math.max(0.0001, this.masterVolume * this.musicVolume * 0.1);
+  }
+
+  private updateMusicGain(): void {
+    if (!this.context || !this.musicMasterGain) {
+      return;
+    }
+
+    this.musicMasterGain.gain.cancelScheduledValues(this.context.currentTime);
+    this.musicMasterGain.gain.setValueAtTime(
+      Math.max(0.0001, this.musicMasterGain.gain.value),
+      this.context.currentTime
+    );
+    this.musicMasterGain.gain.linearRampToValueAtTime(
+      this.getMusicGainValue(),
+      this.context.currentTime + 0.18
+    );
   }
 }

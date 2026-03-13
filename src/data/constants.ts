@@ -12,7 +12,7 @@ export const CAMERA_ZOOM_DEFAULT = 0.82;
 
 export const DEFAULT_SETTINGS: SettingsState = {
   masterVolume: 0.8,
-  musicVolume: 0.55,
+  musicVolume: 0,
   sfxVolume: 0.75,
   edgeScroll: true,
   highFx: true,
@@ -21,7 +21,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
 };
 
 export const createDefaultCampaign = (): CampaignState => ({
-  version: 2,
+  version: 3,
   title: GAME_TITLE,
   credits: 900,
   completedMissions: [],

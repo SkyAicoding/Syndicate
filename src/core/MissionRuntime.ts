@@ -42,7 +42,8 @@ export class MissionRuntime {
       render: {
         antialias: true,
         pixelArt: false,
-        roundPixels: false
+        roundPixels: false,
+        preserveDrawingBuffer: true
       },
       scale: {
         mode: Phaser.Scale.RESIZE,
@@ -102,6 +103,14 @@ export class MissionRuntime {
 
   public commandMoveSelected(cell: { x: number; y: number }): void {
     this.scene.commandMoveSelected(cell);
+  }
+
+  public interactWithProp(propId: string): void {
+    this.scene.interactWithProp(propId);
+  }
+
+  public focusCameraOnCell(cell: { x: number; y: number }): void {
+    this.scene.focusCameraOnCell(cell);
   }
 
   public getTestState(): Record<string, unknown> {

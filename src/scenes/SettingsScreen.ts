@@ -23,11 +23,12 @@ export class SettingsScreen implements Screen {
     container.innerHTML = `
       <section class="screen screen--settings">
         <header class="screen-header">
-          <div>
+          <div class="screen-header__copy">
             <p class="eyebrow">System settings</p>
             <h1>Runtime controls</h1>
+            <p class="screen-copy">Tune audio mix and tactical assist options for the current campaign.</p>
           </div>
-          <button class="button button--ghost" data-action="back">Back</button>
+          <button class="button button--ghost" data-action="back"><span class="button__label">Back</span></button>
         </header>
         <div class="settings-grid">
           <label class="setting-row">
@@ -35,15 +36,15 @@ export class SettingsScreen implements Screen {
             <input type="range" min="0" max="1" step="0.05" value="${settings.masterVolume}" data-setting="masterVolume" />
           </label>
           <label class="setting-row">
-            <span>Music Volume</span>
-            <input type="range" min="0" max="1" step="0.05" value="${settings.musicVolume}" data-setting="musicVolume" />
+            <span>Music Volume (Off)</span>
+            <input type="range" min="0" max="1" step="0.05" value="0" data-setting="musicVolume" disabled />
           </label>
           <label class="setting-row">
             <span>SFX Volume</span>
             <input type="range" min="0" max="1" step="0.05" value="${settings.sfxVolume}" data-setting="sfxVolume" />
           </label>
           <label class="toggle-row">
-            <span>Edge Scroll</span>
+            <span>Drag Camera</span>
             <input type="checkbox" ${settings.edgeScroll ? "checked" : ""} data-setting="edgeScroll" />
           </label>
           <label class="toggle-row">

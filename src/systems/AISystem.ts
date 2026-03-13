@@ -38,7 +38,6 @@ export class AISystem {
         assistPlayers,
         hostiles,
         props,
-        units,
         isWalkableForUnit
       );
     }
@@ -246,7 +245,6 @@ export class AISystem {
     assistPlayers: Unit[],
     hostiles: Unit[],
     props: Prop[],
-    units: Unit[],
     isWalkableForUnit: (unit: Unit, x: number, y: number) => boolean
   ): void {
     assistPlayers.forEach((assistant) => {

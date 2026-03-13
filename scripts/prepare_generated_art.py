@@ -20,12 +20,12 @@ class AssetJob:
 
 
 ASSET_JOBS: tuple[AssetJob, ...] = (
-    AssetJob("tile-road", "phaser/tile-road.png", (128, 64), scale=1.0, trim_padding=6),
-    AssetJob("tile-sidewalk", "phaser/tile-sidewalk.png", (128, 64), scale=1.0, trim_padding=6),
-    AssetJob("tile-plaza", "phaser/tile-plaza.png", (128, 64), scale=1.0, trim_padding=6),
-    AssetJob("tile-lab", "phaser/tile-lab.png", (128, 64), scale=1.0, trim_padding=6),
-    AssetJob("tile-industrial", "phaser/tile-industrial.png", (128, 64), scale=1.0, trim_padding=6),
-    AssetJob("tile-hazard", "phaser/tile-hazard.png", (128, 64), scale=1.0, trim_padding=6),
+    AssetJob("tile-road", "phaser/tile-road.png", (128, 64), mode="tile-cover", trim_padding=6),
+    AssetJob("tile-sidewalk", "phaser/tile-sidewalk.png", (128, 64), mode="tile-cover", trim_padding=6),
+    AssetJob("tile-plaza", "phaser/tile-plaza.png", (128, 64), mode="tile-cover", trim_padding=6),
+    AssetJob("tile-lab", "phaser/tile-lab.png", (128, 64), mode="tile-cover", trim_padding=6),
+    AssetJob("tile-industrial", "phaser/tile-industrial.png", (128, 64), mode="tile-cover", trim_padding=6),
+    AssetJob("tile-hazard", "phaser/tile-hazard.png", (128, 64), mode="tile-cover", trim_padding=6),
     AssetJob("prop-barrier", "phaser/prop-barrier.png", (92, 88), scale=0.98, align=(0.5, 1.0), trim_padding=6),
     AssetJob("prop-crate", "phaser/prop-crate.png", (82, 82), scale=0.98, align=(0.5, 1.0), trim_padding=6),
     AssetJob("prop-terminal", "phaser/prop-terminal.png", (84, 118), scale=0.98, align=(0.5, 1.0), trim_padding=6),
@@ -34,6 +34,19 @@ ASSET_JOBS: tuple[AssetJob, ...] = (
     AssetJob("prop-vehicle", "phaser/prop-vehicle.png", (128, 100), scale=0.98, align=(0.5, 1.0), trim_padding=6),
     AssetJob("prop-neon", "phaser/prop-neon.png", (72, 132), scale=0.98, align=(0.5, 1.0), trim_padding=6),
     AssetJob("prop-barrel", "phaser/prop-barrel.png", (64, 92), scale=0.98, align=(0.5, 1.0), trim_padding=6),
+    AssetJob("prop-hvac", "phaser/prop-hvac.png", (118, 108), scale=0.98, align=(0.5, 1.0), trim_padding=6),
+    AssetJob("prop-skylight", "phaser/prop-skylight.png", (108, 72), scale=0.98, align=(0.5, 1.0), trim_padding=6),
+    AssetJob("prop-uplink", "phaser/prop-uplink.png", (92, 138), scale=0.98, align=(0.5, 1.0), trim_padding=6),
+    AssetJob("prop-stairwell", "phaser/prop-stairwell.png", (118, 142), scale=0.98, align=(0.5, 1.0), trim_padding=6),
+    AssetJob("prop-billboard", "phaser/prop-billboard.png", (138, 176), scale=0.98, align=(0.5, 1.0), trim_padding=6),
+    AssetJob("prop-facade-wall", "phaser/prop-facade-wall.png", (146, 188), scale=0.98, align=(0.5, 1.0), trim_padding=6),
+    AssetJob("prop-facade-corner", "phaser/prop-facade-corner.png", (158, 206), scale=0.98, align=(0.5, 1.0), trim_padding=6),
+    AssetJob("prop-checkpoint", "phaser/prop-checkpoint.png", (154, 134), scale=0.98, align=(0.5, 1.0), trim_padding=6),
+    AssetJob("prop-streetlight", "phaser/prop-streetlight.png", (84, 196), scale=0.98, align=(0.5, 1.0), trim_padding=6),
+    AssetJob("prop-fence", "phaser/prop-fence.png", (156, 118), scale=0.98, align=(0.5, 1.0), trim_padding=6),
+    AssetJob("prop-pipe-bank", "phaser/prop-pipe-bank.png", (176, 122), scale=0.98, align=(0.5, 1.0), trim_padding=6),
+    AssetJob("prop-support-tower", "phaser/prop-support-tower.png", (150, 214), scale=0.98, align=(0.5, 1.0), trim_padding=6),
+    AssetJob("prop-tank-cluster", "phaser/prop-tank-cluster.png", (188, 194), scale=0.98, align=(0.5, 1.0), trim_padding=6),
     AssetJob("unit-player-operator", "phaser/unit-player-operator.png", (84, 112), scale=0.98, align=(0.5, 1.0), trim_padding=4),
     AssetJob("unit-player-breacher", "phaser/unit-player-breacher.png", (84, 112), scale=0.98, align=(0.5, 1.0), trim_padding=4),
     AssetJob("unit-player-infiltrator", "phaser/unit-player-infiltrator.png", (84, 112), scale=0.98, align=(0.5, 1.0), trim_padding=4),
@@ -109,6 +122,21 @@ def cover_to_size(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     return ImageOps.fit(image, size, method=Image.Resampling.LANCZOS, centering=(0.5, 0.35))
 
 
+def cover_trimmed_to_size(
+    image: Image.Image,
+    size: tuple[int, int],
+    align: tuple[float, float],
+    trim_padding: int,
+) -> Image.Image:
+    source = trim_to_alpha(image, trim_padding)
+    return ImageOps.fit(
+        source,
+        size,
+        method=Image.Resampling.LANCZOS,
+        centering=align,
+    )
+
+
 def stretch_to_size(
     image: Image.Image,
     size: tuple[int, int],
@@ -131,6 +159,11 @@ def main() -> int:
         default="public/generated",
         help="Directory to write prepared runtime assets into.",
     )
+    parser.add_argument(
+        "--allow-missing",
+        action="store_true",
+        help="Return success even when some source images are missing.",
+    )
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -151,6 +184,8 @@ def main() -> int:
         output = (
             cover_to_size(source, job.size)
             if job.mode == "cover"
+            else cover_trimmed_to_size(source, job.size, job.align, job.trim_padding)
+            if job.mode == "tile-cover"
             else stretch_to_size(
                 source,
                 job.size,
@@ -178,7 +213,7 @@ def main() -> int:
         for name in missing:
             print(f"- {name}")
 
-    return 0 if not missing else 1
+    return 0 if args.allow_missing or not missing else 1
 
 
 if __name__ == "__main__":

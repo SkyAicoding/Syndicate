@@ -4,6 +4,8 @@ test-results/
 playwright-report/
 generated-images/
 output/
+tmp/
+progress.md
 .env.local
 *.log
 .DS_Store

@@ -27,23 +27,29 @@ export class ResultScreen implements Screen {
     container.innerHTML = `
       <section class="screen screen--result">
         <div class="result-panel ${result.success ? "is-success" : "is-failure"}" data-testid="mission-result-screen">
-          <p class="eyebrow">${mission.name}</p>
-          <h1>${result.title}</h1>
-          <p>${result.summary}</p>
-          <div class="detail-grid">
-            <div><span class="label">Payout</span><strong>${formatCredits(result.creditsEarned)}</strong></div>
-            <div><span class="label">Casualties</span><strong>${result.casualties.length || 0}</strong></div>
-            <div><span class="label">Region</span><strong>${mission.regionName}</strong></div>
-            <div><span class="label">Status</span><strong>${result.success ? "Secured" : "Compromised"}</strong></div>
-          </div>
-          ${
-            result.casualties.length
-              ? `<div class="casualty-list"><p class="label">Agents down</p><strong>${result.casualties.join(", ")}</strong></div>`
-              : ""
-          }
-          <div class="panel-actions">
-            <button class="button button--primary" data-action="map">Return to Region Map</button>
-            <button class="button" data-action="retry">Retry Operation</button>
+          <div class="result-panel__content">
+            <div class="result-panel__frame">
+              <div class="result-panel__headline">
+                <p class="eyebrow">${mission.name}</p>
+                <h1>${result.title}</h1>
+                <p class="screen-copy">${result.summary}</p>
+              </div>
+              <div class="detail-grid detail-grid--result">
+                <div class="detail-card"><span class="label">Payout</span><strong>${formatCredits(result.creditsEarned)}</strong></div>
+                <div class="detail-card"><span class="label">Casualties</span><strong>${result.casualties.length || 0}</strong></div>
+                <div class="detail-card"><span class="label">Region</span><strong>${mission.regionName}</strong></div>
+                <div class="detail-card"><span class="label">Status</span><strong>${result.success ? "Secured" : "Compromised"}</strong></div>
+              </div>
+              ${
+                result.casualties.length
+                  ? `<div class="casualty-list casualty-list--result"><p class="label">Agents down</p><strong>${result.casualties.join(", ")}</strong></div>`
+                  : ""
+              }
+            </div>
+            <div class="panel-actions panel-actions--result">
+              <button class="button button--primary" data-action="map"><span class="button__label">Return to Region Map</span></button>
+              <button class="button" data-action="retry"><span class="button__label">Retry Operation</span></button>
+            </div>
           </div>
         </div>
       </section>

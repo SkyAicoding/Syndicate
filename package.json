@@ -8,7 +8,10 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "playwright test"
+    "typecheck:strict": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
+    "test:e2e": "playwright test",
+    "verify": "npm run typecheck && npm run build && npm run test:e2e",
+    "qa:client": "node scripts/run_web_game_client.mjs"
   },
   "dependencies": {
     "phaser": "^3.90.0"

@@ -3,6 +3,15 @@ import path from "node:path";
 
 const WIDTH = 120;
 const HEIGHT = 120;
+const BLOCKED = 3;
+const MAX_CITY_BOUNDS = {
+  left: 2,
+  top: 4,
+  right: 117,
+  bottom: 117
+};
+
+const keyOf = (x, y) => `${x},${y}`;
 
 const createGrid = (fill = 0) =>
   Array.from({ length: HEIGHT }, () => Array.from({ length: WIDTH }, () => fill));
@@ -28,6 +37,7 @@ const createBuilder = () => {
   const elevation = createGrid(0);
   const traversal = createGrid(0);
   const objects = [];
+  const propKindsByCell = new Map();
   let nextObjectId = 1;
 
   const inBounds = (x, y) => x >= 0 && y >= 0 && x < WIDTH && y < HEIGHT;
@@ -104,8 +114,46 @@ const createBuilder = () => {
   const addVip = (label, x, y) =>
     addObject("spawn_vip", { gridX: x, gridY: y, label }, label.toLowerCase());
 
-  const addProp = (kind, x, y, extra = {}) =>
+  const hasNearbyPropKind = (x, y, kinds) => {
+    for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+      for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+        if (!inBounds(x + offsetX, y + offsetY)) {
+          continue;
+        }
+        const nearby = propKindsByCell.get(keyOf(x + offsetX, y + offsetY));
+        if (nearby && kinds.some((kind) => nearby.has(kind))) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  };
+
+  const addProp = (kind, x, y, extra = {}) => {
+    if (!inBounds(x, y)) {
+      return;
+    }
+
+    const key = keyOf(x, y);
+    const existing = propKindsByCell.get(key) ?? new Set();
+
+    if (existing.has(kind)) {
+      return;
+    }
+
+    // Prefer solid wall silhouettes over a second fence line hugging the same boundary.
+    if (
+      kind === "fence" &&
+      hasNearbyPropKind(x, y, ["facade-wall", "facade-corner"])
+    ) {
+      return;
+    }
+
+    existing.add(kind);
+    propKindsByCell.set(key, existing);
     addObject(`prop_${kind}`, { gridX: x, gridY: y, ...extra }, `${kind}-${x}-${y}`);
+  };
 
   const addExtract = (x, y) =>
     addObject("marker_extract", { gridX: x, gridY: y }, `extract-${x}-${y}`);
@@ -118,6 +166,18 @@ const createBuilder = () => {
 
   const addStairs = (cells) => {
     cells.forEach((cell) => setCell(traversal, cell.x, cell.y, 1));
+  };
+
+  const blockCell = (x, y) => setCell(traversal, x, y, BLOCKED);
+
+  const blockRect = (x, y, width, height) => {
+    fillRect(traversal, x, y, width, height, BLOCKED);
+  };
+
+  const clearBlockedCell = (x, y) => {
+    if (traversal[y]?.[x] === BLOCKED) {
+      setCell(traversal, x, y, 0);
+    }
   };
 
   const addElevator = (from, to) => {
@@ -135,23 +195,47 @@ const createBuilder = () => {
     );
   };
 
-  const addRoofRail = (x, y, width, height) => {
-    for (let column = x; column < x + width; column += 2) {
-      if (traversal[y][column] === 0) {
-        addProp("barrier", column, y);
+  const addEdgePropLine = (kind, from, to, extra = {}, skipCells = new Set()) => {
+    if (from.y === to.y) {
+      const minX = Math.min(from.x, to.x);
+      const maxX = Math.max(from.x, to.x);
+      for (let x = minX; x <= maxX; x += 1) {
+        if (!inBounds(x, from.y) || traversal[from.y][x] !== 0 || skipCells.has(keyOf(x, from.y))) {
+          continue;
+        }
+        addProp(kind, x, from.y, { ...extra, variant: "diag-right" });
       }
-      if (traversal[y + height - 1][column] === 0) {
-        addProp("barrier", column, y + height - 1);
+      return;
+    }
+
+    if (from.x === to.x) {
+      const minY = Math.min(from.y, to.y);
+      const maxY = Math.max(from.y, to.y);
+      for (let y = minY; y <= maxY; y += 1) {
+        if (!inBounds(from.x, y) || traversal[y][from.x] !== 0 || skipCells.has(keyOf(from.x, y))) {
+          continue;
+        }
+        addProp(kind, from.x, y, { ...extra, variant: "diag-left" });
       }
     }
-    for (let row = y + 1; row < y + height - 1; row += 2) {
-      if (traversal[row][x] === 0) {
-        addProp("barrier", x, row);
-      }
-      if (traversal[row][x + width - 1] === 0) {
-        addProp("barrier", x + width - 1, row);
-      }
-    }
+  };
+
+  const addOutlinedPropLoop = (kind, { left, top, right, bottom, skipCells = [] }) => {
+    const skip = new Set(skipCells.map((cell) => keyOf(cell.x, cell.y)));
+    addEdgePropLine(kind, { x: left, y: top }, { x: right, y: top }, {}, skip);
+    addEdgePropLine(kind, { x: left, y: bottom }, { x: right, y: bottom }, {}, skip);
+    addEdgePropLine(kind, { x: left, y: top }, { x: left, y: bottom }, {}, skip);
+    addEdgePropLine(kind, { x: right, y: top }, { x: right, y: bottom }, {}, skip);
+  };
+
+  const addRoofRail = (x, y, width, height, openings = []) => {
+    addOutlinedPropLoop("fence", {
+      left: x,
+      top: y,
+      right: x + width - 1,
+      bottom: y + height - 1,
+      skipCells: openings
+    });
   };
 
   return {
@@ -173,7 +257,12 @@ const createBuilder = () => {
     addReinforcement,
     addObjectiveTerminal,
     addStairs,
+    blockCell,
+    blockRect,
+    clearBlockedCell,
     addElevator,
+    addEdgePropLine,
+    addOutlinedPropLoop,
     addRoofRail,
     toJson: () => ({
       compressionlevel: -1,
@@ -268,115 +357,281 @@ const createBuilder = () => {
   };
 };
 
+const addStreetlights = (map, cells) => {
+  cells.forEach(([x, y]) => map.addProp("streetlight", x, y));
+};
+
+const addCheckpoints = (map, cells) => {
+  cells.forEach(([x, y]) => map.addProp("checkpoint", x, y));
+};
+
+const addCityPerimeter = (map, { left, top, right, bottom, skipCells = [] }) => {
+  map.addOutlinedPropLoop("facade-wall", {
+    left,
+    top,
+    right,
+    bottom,
+    skipCells
+  });
+};
+
+const addBlockedBuilding = (
+  map,
+  { x, y, width, height, groundTile = 4, detailTile = 6, extras = [] }
+) => {
+  map.fillRect(map.ground, x, y, width, height, groundTile);
+  map.checker(map.detail, x, y, width, height, detailTile, 5);
+  map.blockRect(x, y, width, height);
+  map.addOutlinedPropLoop("facade-wall", {
+    left: x,
+    top: y,
+    right: x + width - 1,
+    bottom: y + height - 1
+  });
+  extras.forEach(([kind, cellX, cellY]) => map.addProp(kind, cellX, cellY));
+};
+
+const addFenceLine = (map, from, to) => {
+  map.addEdgePropLine("fence", from, to);
+};
+
+const fillMissionEnvelope = (map, groundTile, detailTile, detailStep) => {
+  map.fillRect(
+    map.ground,
+    MAX_CITY_BOUNDS.left,
+    MAX_CITY_BOUNDS.top,
+    MAX_CITY_BOUNDS.right - MAX_CITY_BOUNDS.left + 1,
+    MAX_CITY_BOUNDS.bottom - MAX_CITY_BOUNDS.top + 1,
+    groundTile
+  );
+  map.checker(
+    map.detail,
+    MAX_CITY_BOUNDS.left,
+    MAX_CITY_BOUNDS.top,
+    MAX_CITY_BOUNDS.right - MAX_CITY_BOUNDS.left + 1,
+    MAX_CITY_BOUNDS.bottom - MAX_CITY_BOUNDS.top + 1,
+    detailTile,
+    detailStep
+  );
+};
+
+const addPipeField = (map, { x, y, width, height, rows = 2 }) => {
+  map.fillRect(map.ground, x, y, width, height, 5);
+  map.checker(map.detail, x, y, width, height, 6, 4);
+  map.fillRect(map.elevation, x, y, width, height, 3);
+  map.blockRect(x, y, width, height);
+
+  for (let row = 0; row < rows; row += 1) {
+    const pipeY = y + 2 + row * 3;
+    for (let column = x + 2; column < x + width - 1; column += 4) {
+      map.addProp("pipe-bank", column, pipeY);
+    }
+  }
+};
+
+const addVoidZone = (map, { x, y, width, height }) => {
+  map.fillRect(map.ground, x, y, width, height, 6);
+  map.blockRect(x, y, width, height);
+};
+
+const addFacadeFootprint = addBlockedBuilding;
+
 const buildGlasslineCut = () => {
   const map = createBuilder();
 
-  map.fillRect(map.ground, 24, 66, 58, 10, 1);
-  map.fillRect(map.ground, 50, 34, 12, 50, 1);
-  map.fillRect(map.ground, 22, 64, 62, 14, 2);
-  map.fillRect(map.ground, 46, 32, 20, 54, 2);
-  map.fillRect(map.ground, 52, 40, 20, 18, 3);
-  map.fillRect(map.ground, 56, 42, 12, 10, 3);
-  map.fillRect(map.elevation, 56, 42, 12, 10, 2);
-  map.fillRect(map.ground, 34, 74, 12, 10, 2);
-  map.fillRect(map.ground, 70, 58, 12, 10, 2);
-  map.checker(map.detail, 52, 40, 20, 18, 3, 3);
-  map.checker(map.detail, 24, 66, 58, 10, 2, 4);
-  map.strokeRect(map.detail, 56, 42, 12, 10, 2);
+  fillMissionEnvelope(map, 2, 1, 6);
+
+  addBlockedBuilding(map, {
+    x: 18,
+    y: 36,
+    width: 20,
+    height: 18,
+    groundTile: 4,
+    detailTile: 6,
+    extras: [
+      ["neon", 20, 36],
+      ["hvac", 28, 42],
+      ["skylight", 32, 40],
+      ["support-tower", 24, 46]
+    ]
+  });
+  addPipeField(map, { x: 74, y: 36, width: 18, height: 16, rows: 3 });
+  map.addProp("tank-cluster", 84, 44);
+  map.addProp("support-tower", 76, 50);
+  addBlockedBuilding(map, {
+    x: 18,
+    y: 80,
+    width: 14,
+    height: 14,
+    groundTile: 4,
+    detailTile: 6,
+    extras: [
+      ["door", 24, 92],
+      ["terminal", 26, 86],
+      ["fence", 18, 88]
+    ]
+  });
+  addBlockedBuilding(map, {
+    x: 78,
+    y: 78,
+    width: 16,
+    height: 16,
+    groundTile: 4,
+    detailTile: 6,
+    extras: [
+      ["billboard", 86, 78],
+      ["hvac", 84, 86],
+      ["support-tower", 90, 90]
+    ]
+  });
+  addVoidZone(map, { x: 40, y: 34, width: 20, height: 8 });
+  addVoidZone(map, { x: 62, y: 82, width: 12, height: 12 });
+  addVoidZone(map, { x: 94, y: 54, width: 6, height: 18 });
+
+  map.fillRect(map.ground, 20, 68, 60, 10, 1);
+  map.fillRect(map.ground, 40, 46, 12, 44, 1);
+  map.fillRect(map.ground, 58, 58, 34, 10, 1);
+  map.fillRect(map.ground, 32, 80, 30, 10, 3);
+  map.fillRect(map.ground, 50, 38, 24, 24, 2);
+  map.fillRect(map.ground, 54, 42, 16, 12, 3);
+  map.fillRect(map.elevation, 54, 42, 16, 12, 2);
+  map.checker(map.detail, 20, 68, 60, 10, 2, 4);
+  map.checker(map.detail, 40, 46, 12, 44, 2, 4);
+  map.checker(map.detail, 58, 58, 34, 10, 2, 4);
+  map.checker(map.detail, 32, 80, 30, 10, 2, 4);
+  map.checker(map.detail, 50, 38, 24, 24, 2, 4);
+  map.checker(map.detail, 54, 42, 16, 12, 2, 3);
+  map.strokeRect(map.detail, 54, 42, 16, 12, 2);
+  addCityPerimeter(map, MAX_CITY_BOUNDS);
+
+  addFenceLine(map, { x: 40, y: 42 }, { x: 59, y: 42 });
+  addFenceLine(map, { x: 62, y: 82 }, { x: 73, y: 82 });
+  addFenceLine(map, { x: 74, y: 52 }, { x: 91, y: 52 });
+  addFenceLine(map, { x: 74, y: 36 }, { x: 74, y: 51 });
 
   map.addStairs([
-    { x: 55, y: 46 },
-    { x: 56, y: 46 },
-    { x: 55, y: 47 },
-    { x: 56, y: 47 },
-    { x: 68, y: 48 },
-    { x: 67, y: 48 },
-    { x: 68, y: 47 },
-    { x: 67, y: 47 }
+    { x: 53, y: 47 },
+    { x: 54, y: 47 },
+    { x: 53, y: 48 },
+    { x: 54, y: 48 },
+    { x: 69, y: 48 },
+    { x: 70, y: 48 },
+    { x: 69, y: 49 },
+    { x: 70, y: 49 }
   ]);
-  map.addElevator({ x: 62, y: 54 }, { x: 62, y: 49 });
-  map.addRoofRail(56, 42, 12, 10);
+  map.addElevator({ x: 62, y: 60 }, { x: 62, y: 48 });
+  map.addRoofRail(54, 42, 16, 12, [
+    { x: 54, y: 47 },
+    { x: 54, y: 48 },
+    { x: 69, y: 48 },
+    { x: 69, y: 49 }
+  ]);
 
   map.addPlayerSpawns([
-    { x: 28, y: 76 },
-    { x: 30, y: 76 },
-    { x: 28, y: 77 },
-    { x: 30, y: 77 }
+    { x: 36, y: 86 },
+    { x: 38, y: 86 },
+    { x: 36, y: 88 },
+    { x: 38, y: 88 }
   ]);
 
-  map.addEnemy("Broker Courier", 63, 46, "pistol", {
+  map.addEnemy("Broker Courier", 63, 47, "enemy-sidearm", {
     elite: true,
     objectiveTarget: true,
     rooftop: true
   });
-  map.addEnemy("Escort", 59, 44, "rifle", {
-    patrol: "59,44|64,44|64,49|59,49",
+  map.addEnemy("Escort", 58, 45, "enemy-carbine", {
+    patrol: "58,45|66,45|66,51|58,51",
     rooftop: true
   });
-  map.addEnemy("Sentinel", 66, 49, "smg", {
-    patrol: "66,49|66,45|64,45|64,49",
+  map.addEnemy("Sentinel", 67, 50, "enemy-needler", {
+    patrol: "67,50|67,44|63,44|63,50",
     rooftop: true
   });
-  map.addEnemy("Patrol", 51, 64, "rifle", {
-    patrol: "51,64|57,64|57,71|51,71"
+  map.addEnemy("Patrol", 47, 72, "enemy-carbine", {
+    patrol: "43,72|57,72|57,77|43,77"
   });
-  map.addEnemy("Lookout", 73, 66, "smg", {
-    patrol: "73,66|78,66|78,72|73,72"
+  map.addEnemy("Lookout", 82, 62, "enemy-needler", {
+    patrol: "74,62|88,62|88,66|74,66"
   });
-  map.addEnemy("Boulevard Watch", 43, 74, "rifle");
+  map.addEnemy("Boulevard Watch", 60, 84, "enemy-lancer");
 
-  map.addCivilian("Pedestrian", 38, 80);
-  map.addCivilian("Vendor", 46, 78);
-  map.addCivilian("Clerk", 70, 70);
+  map.addCivilian("Pedestrian", 46, 86);
+  map.addCivilian("Vendor", 56, 74);
+  map.addCivilian("Clerk", 84, 66);
 
   [
-    [40, 70],
-    [76, 72]
+    [28, 74],
+    [66, 72],
+    [86, 70]
   ].forEach(([x, y]) => map.addProp("vehicle", x, y));
   [
-    [74, 40],
-    [68, 60]
+    [18, 68],
+    [58, 38],
+    [92, 58]
   ].forEach(([x, y]) => map.addProp("neon", x, y));
   [
-    [60, 53],
-    [64, 53]
+    [58, 55],
+    [66, 55]
   ].forEach(([x, y]) => map.addProp("door", x, y));
   [
-    [58, 43],
-    [65, 43],
-    [58, 50],
-    [65, 50]
+    [56, 43],
+    [67, 43],
+    [56, 52],
+    [67, 52]
   ].forEach(([x, y]) => map.addProp("glass", x, y));
   [
-    [53, 60],
-    [69, 62],
-    [57, 74],
-    [74, 64]
+    [42, 64],
+    [54, 66],
+    [72, 70],
+    [48, 84]
   ].forEach(([x, y]) => map.addProp("crate", x, y));
+  map.addProp("armory-locker", 42, 86, {
+    interactive: true,
+    interactionId: "field-armory",
+    interactionLabel: "Open field armory",
+    lootWeapon: "battle-rifle",
+    lootAmmoAmount: 16
+  });
   [
-    [55, 61],
-    [71, 63]
+    [44, 62],
+    [76, 68]
   ].forEach(([x, y]) => map.addProp("barrel", x, y));
   [
-    [61, 45],
+    [61, 46],
     [63, 50]
   ].forEach(([x, y]) => map.addProp("terminal", x, y));
   [
-    [57, 49],
-    [65, 47]
+    [58, 49],
+    [66, 47]
   ].forEach(([x, y]) => map.addProp("hvac", x, y));
   [
-    [60, 43]
+    [61, 43]
   ].forEach(([x, y]) => map.addProp("skylight", x, y));
   [
-    [67, 50]
+    [68, 51]
   ].forEach(([x, y]) => map.addProp("uplink", x, y));
   [
-    [58, 47]
+    [56, 48]
   ].forEach(([x, y]) => map.addProp("stairwell", x, y));
   [
-    [70, 42]
+    [24, 32],
+    [84, 32]
   ].forEach(([x, y]) => map.addProp("billboard", x, y));
+  addStreetlights(map, [
+    [34, 80],
+    [44, 80],
+    [54, 80],
+    [22, 68],
+    [34, 68],
+    [58, 68],
+    [72, 68],
+    [84, 58]
+  ]);
+  addCheckpoints(map, [
+    [34, 84],
+    [52, 72],
+    [88, 60]
+  ]);
   map.addProp("uplink", 63, 48, {
     interactive: true,
     interactionId: "spire-uplink",
@@ -389,17 +644,27 @@ const buildGlasslineCut = () => {
 const buildQuietRelay = () => {
   const map = createBuilder();
 
-  map.fillRect(map.ground, 20, 80, 26, 14, 1);
-  map.fillRect(map.ground, 18, 78, 30, 18, 2);
-  map.fillRect(map.ground, 34, 64, 26, 22, 2);
+  fillMissionEnvelope(map, 2, 1, 5);
+  map.fillRect(map.ground, 20, 80, 28, 14, 1);
+  map.fillRect(map.ground, 34, 76, 34, 12, 1);
+  map.fillRect(map.ground, 46, 46, 18, 46, 1);
+  map.fillRect(map.ground, 64, 46, 20, 12, 1);
+  addFacadeFootprint(map, { x: 18, y: 66, width: 16, height: 10, groundTile: 4, step: 4 });
+  addFacadeFootprint(map, { x: 70, y: 64, width: 14, height: 12, groundTile: 4, step: 4 });
+  addFacadeFootprint(map, { x: 70, y: 88, width: 14, height: 10, groundTile: 4, step: 4 });
+  map.fillRect(map.ground, 34, 64, 26, 22, 4);
   map.fillRect(map.ground, 48, 52, 24, 18, 4);
   map.fillRect(map.ground, 56, 36, 14, 14, 4);
   map.fillRect(map.elevation, 56, 36, 14, 14, 2);
-  map.fillRect(map.ground, 72, 44, 10, 12, 4);
+  map.fillRect(map.ground, 72, 44, 12, 14, 4);
   map.fillRect(map.ground, 54, 70, 12, 8, 3);
-  map.checker(map.detail, 48, 52, 24, 18, 4, 3);
-  map.checker(map.detail, 56, 36, 14, 14, 4, 2);
+  map.checker(map.detail, 20, 80, 28, 14, 2, 4);
+  map.checker(map.detail, 34, 76, 34, 12, 2, 4);
+  map.checker(map.detail, 46, 46, 18, 46, 2, 4);
+  map.checker(map.detail, 48, 52, 24, 18, 2, 3);
+  map.checker(map.detail, 56, 36, 14, 14, 2, 2);
   map.strokeRect(map.detail, 56, 36, 14, 14, 2);
+  addCityPerimeter(map, MAX_CITY_BOUNDS);
 
   map.addStairs([
     { x: 55, y: 42 },
@@ -412,7 +677,12 @@ const buildQuietRelay = () => {
     { x: 68, y: 45 }
   ]);
   map.addElevator({ x: 62, y: 54 }, { x: 62, y: 44 });
-  map.addRoofRail(56, 36, 14, 14);
+  map.addRoofRail(56, 36, 14, 14, [
+    { x: 56, y: 42 },
+    { x: 56, y: 43 },
+    { x: 69, y: 45 },
+    { x: 69, y: 46 }
+  ]);
 
   map.addPlayerSpawns([
     { x: 24, y: 90 },
@@ -423,21 +693,21 @@ const buildQuietRelay = () => {
   map.addExtract(24, 88);
   map.addVip("Dr. Sera Iven", 64, 41);
 
-  map.addEnemy("Hall Guard", 58, 60, "rifle", {
+  map.addEnemy("Hall Guard", 58, 60, "enemy-carbine", {
     patrol: "58,60|64,60|64,66|58,66"
   });
-  map.addEnemy("Containment Guard", 61, 44, "smg", {
+  map.addEnemy("Containment Guard", 61, 44, "enemy-needler", {
     patrol: "61,44|66,44|66,47|61,47",
     rooftop: true
   });
-  map.addEnemy("Lab Enforcer", 67, 40, "shotgun", {
+  map.addEnemy("Lab Enforcer", 67, 40, "enemy-suppressor", {
     elite: true,
     rooftop: true
   });
-  map.addEnemy("Observer", 50, 64, "rifle", {
+  map.addEnemy("Observer", 50, 64, "enemy-carbine", {
     patrol: "50,64|54,64|54,58|50,58"
   });
-  map.addEnemy("Atrium Watch", 74, 48, "smg");
+  map.addEnemy("Atrium Watch", 74, 48, "enemy-lancer");
 
   [
     [48, 70],
@@ -455,14 +725,23 @@ const buildQuietRelay = () => {
     [63, 41]
   ].forEach(([x, y]) => map.addProp("terminal", x, y));
   [
+    [34, 82],
     [44, 82],
     [58, 74]
   ].forEach(([x, y]) => map.addProp("vehicle", x, y));
   [
+    [40, 66],
     [46, 78],
     [71, 52],
     [66, 70]
   ].forEach(([x, y]) => map.addProp("crate", x, y));
+  map.addProp("armory-locker", 30, 90, {
+    interactive: true,
+    interactionId: "field-armory",
+    interactionLabel: "Open field armory",
+    lootWeapon: "pdw-90",
+    lootAmmoAmount: 32
+  });
   [
     [55, 73],
     [69, 57]
@@ -484,8 +763,25 @@ const buildQuietRelay = () => {
     [57, 46]
   ].forEach(([x, y]) => map.addProp("stairwell", x, y));
   [
+    [22, 34],
     [72, 40]
   ].forEach(([x, y]) => map.addProp("billboard", x, y));
+  addStreetlights(map, [
+    [18, 42],
+    [18, 74],
+    [22, 96],
+    [20, 78],
+    [30, 78],
+    [40, 78],
+    [52, 74],
+    [70, 56],
+    [78, 48]
+  ]);
+  addCheckpoints(map, [
+    [20, 88],
+    [48, 80],
+    [74, 54]
+  ]);
   map.addProp("uplink", 63, 42, {
     interactive: true,
     interactionId: "aegis-relay",
@@ -498,16 +794,26 @@ const buildQuietRelay = () => {
 const buildStaticBloom = () => {
   const map = createBuilder();
 
-  map.fillRect(map.ground, 20, 78, 22, 16, 2);
-  map.fillRect(map.ground, 24, 56, 60, 28, 5);
+  fillMissionEnvelope(map, 5, 6, 5);
+  map.fillRect(map.ground, 20, 78, 26, 16, 1);
+  map.fillRect(map.ground, 24, 56, 64, 28, 1);
+  map.fillRect(map.ground, 44, 44, 12, 52, 1);
+  map.fillRect(map.ground, 78, 44, 14, 42, 1);
+  addFacadeFootprint(map, { x: 18, y: 66, width: 14, height: 12, groundTile: 5, step: 4 });
+  addFacadeFootprint(map, { x: 84, y: 62, width: 12, height: 14, groundTile: 5, step: 4 });
+  addFacadeFootprint(map, { x: 18, y: 86, width: 14, height: 12, groundTile: 5, step: 4 });
+  addFacadeFootprint(map, { x: 62, y: 86, width: 14, height: 10, groundTile: 5, step: 4 });
   map.fillRect(map.ground, 70, 44, 12, 10, 6);
   map.fillRect(map.ground, 64, 36, 22, 16, 5);
   map.fillRect(map.elevation, 64, 36, 22, 16, 2);
   map.fillRect(map.ground, 82, 60, 12, 14, 1);
   map.fillRect(map.ground, 44, 86, 18, 8, 1);
-  map.checker(map.detail, 24, 56, 60, 28, 6, 4);
-  map.checker(map.detail, 64, 36, 22, 16, 5, 3);
+  map.checker(map.detail, 24, 56, 64, 28, 6, 4);
+  map.checker(map.detail, 44, 44, 12, 52, 6, 4);
+  map.checker(map.detail, 78, 44, 14, 42, 6, 4);
+  map.checker(map.detail, 64, 36, 22, 16, 6, 3);
   map.strokeRect(map.detail, 64, 36, 22, 16, 2);
+  addCityPerimeter(map, MAX_CITY_BOUNDS);
 
   map.addStairs([
     { x: 63, y: 42 },
@@ -520,7 +826,12 @@ const buildStaticBloom = () => {
     { x: 84, y: 45 }
   ]);
   map.addElevator({ x: 72, y: 56 }, { x: 72, y: 44 });
-  map.addRoofRail(64, 36, 22, 16);
+  map.addRoofRail(64, 36, 22, 16, [
+    { x: 64, y: 42 },
+    { x: 64, y: 43 },
+    { x: 85, y: 45 },
+    { x: 85, y: 46 }
+  ]);
 
   map.addPlayerSpawns([
     { x: 24, y: 90 },
@@ -531,19 +842,19 @@ const buildStaticBloom = () => {
   map.addExtract(24, 88);
   map.addObjectiveTerminal(76, 42);
 
-  map.addEnemy("Yard Guard", 48, 72, "rifle");
-  map.addEnemy("Machine Guard", 70, 54, "smg", {
+  map.addEnemy("Yard Guard", 48, 72, "enemy-carbine");
+  map.addEnemy("Machine Guard", 70, 54, "enemy-suppressor", {
     patrol: "70,54|78,54|78,60|70,60"
   });
-  map.addEnemy("Core Enforcer", 80, 42, "shotgun", {
+  map.addEnemy("Core Enforcer", 80, 42, "enemy-suppressor", {
     elite: true,
     rooftop: true
   });
-  map.addEnemy("Road Patrol", 88, 68, "rifle", {
+  map.addEnemy("Road Patrol", 88, 68, "enemy-carbine", {
     patrol: "88,68|92,68|92,74|88,74"
   });
-  map.addEnemy("Stack Watch", 66, 40, "smg");
-  map.addEnemy("Roof Sniper", 84, 44, "rifle", {
+  map.addEnemy("Stack Watch", 66, 40, "enemy-needler");
+  map.addEnemy("Roof Sniper", 84, 44, "enemy-lancer", {
     rooftop: true
   });
 
@@ -564,6 +875,7 @@ const buildStaticBloom = () => {
   ].forEach(([x, y]) => map.addProp("terminal", x, y));
   [
     [36, 80],
+    [52, 88],
     [90, 70]
   ].forEach(([x, y]) => map.addProp("vehicle", x, y));
   [
@@ -572,6 +884,13 @@ const buildStaticBloom = () => {
     [71, 58],
     [82, 54]
   ].forEach(([x, y]) => map.addProp("crate", x, y));
+  map.addProp("armory-locker", 30, 90, {
+    interactive: true,
+    interactionId: "field-armory",
+    interactionLabel: "Open field armory",
+    lootWeapon: "machine-gun",
+    lootAmmoAmount: 36
+  });
   [
     [66, 60],
     [72, 60],
@@ -599,8 +918,25 @@ const buildStaticBloom = () => {
     [65, 46]
   ].forEach(([x, y]) => map.addProp("stairwell", x, y));
   [
+    [24, 34],
     [86, 40]
   ].forEach(([x, y]) => map.addProp("billboard", x, y));
+  addStreetlights(map, [
+    [18, 44],
+    [18, 78],
+    [22, 96],
+    [22, 78],
+    [32, 78],
+    [42, 78],
+    [88, 60],
+    [92, 68],
+    [74, 84]
+  ]);
+  addCheckpoints(map, [
+    [24, 88],
+    [44, 84],
+    [86, 66]
+  ]);
   map.addProp("uplink", 74, 44, {
     interactive: true,
     interactionId: "verge-uplink",

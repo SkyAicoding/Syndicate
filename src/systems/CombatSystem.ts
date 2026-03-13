@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import type { GridPos } from "../core/missionTypes";
 import type { AudioDirector } from "../core/audio";
+import type { WeaponDefinition } from "../data/types";
 import { WEAPONS } from "../data/weapons";
 import { IsoMap } from "./IsoMap";
 import { Prop } from "../entities/Prop";
@@ -117,6 +118,10 @@ export class CombatSystem {
         return;
       }
 
+      if (!unit.hasAmmoForAttack()) {
+        return;
+      }
+
       const movementPenalty = unit.movePath.length ? weapon.movePenalty : 0;
       const coverPenalty =
         target instanceof Unit
@@ -132,40 +137,47 @@ export class CombatSystem {
 
       unit.shotCooldown =
         (weapon.rate + Phaser.Math.FloatBetween(0.02, 0.08)) / unit.fireRateMultiplier;
+      unit.consumeAmmoForAttack();
       this.audio.playWeapon(unit.weaponId);
       this.callbacks.onNoise(unit.currentCell);
       const targetLevel =
         target instanceof Unit
           ? this.map.getElevationAt(target.currentCell.x, target.currentCell.y)
           : this.map.getElevationAt(target.cell.x, target.cell.y);
-      this.renderShot(unit, targetCell, weapon.color, targetLevel);
+      this.renderShot(unit, targetCell, weapon, targetLevel);
 
       const hit = Math.random() <= hitChance;
       if (target instanceof Unit) {
         target.applyPressure(weapon.pressure);
         if (hit) {
-          const burstFactor = weapon.burst === 3 ? 1.3 : weapon.burst === 2 ? 1.12 : 1;
+          const burstFactor =
+            weapon.burst >= 5 ? 1.4 : weapon.burst === 4 ? 1.33 : weapon.burst === 3 ? 1.26 : weapon.burst === 2 ? 1.12 : 1;
           target.takeDamage(weapon.damage * burstFactor);
           this.renderImpact(
             target.getWorldPosition(),
             false,
             false,
-            this.map.getElevationAt(target.currentCell.x, target.currentCell.y)
+            this.map.getElevationAt(target.currentCell.x, target.currentCell.y),
+            weapon
           );
-          this.audio.playImpact();
+          this.audio.playImpact(weapon.id);
           if (!target.alive) {
             this.callbacks.onUnitDown(target);
           }
         }
       } else {
-        const damage = weapon.damage * (target.kind === "barrel" ? this.breachDamageBonus : 1);
+        const damage =
+          weapon.damage *
+          weapon.propDamageMultiplier *
+          (target.kind === "barrel" ? this.breachDamageBonus : 1);
         if (target.takeDamage(damage)) {
           this.callbacks.onPropDestroyed(target);
           this.renderImpact(
             this.map.gridToWorld(target.cell),
             true,
             false,
-            this.map.getElevationAt(target.cell.x, target.cell.y)
+            this.map.getElevationAt(target.cell.x, target.cell.y),
+            weapon
           );
           if (target.kind === "barrel") {
             this.audio.playExplosion();
@@ -179,7 +191,8 @@ export class CombatSystem {
           target.getWorldPosition(),
           false,
           true,
-          this.map.getElevationAt(target.currentCell.x, target.currentCell.y)
+          this.map.getElevationAt(target.currentCell.x, target.currentCell.y),
+          weapon
         );
       }
 
@@ -210,23 +223,46 @@ export class CombatSystem {
     );
   }
 
-  private renderShot(unit: Unit, targetCell: GridPos, color: number, targetLevel: number): void {
+  private renderShot(
+    unit: Unit,
+    targetCell: GridPos,
+    weapon: WeaponDefinition,
+    targetLevel: number
+  ): void {
     const start = unit.getWorldPosition();
     const end = this.map.gridToWorld(targetCell);
     const startLevel = this.map.getElevationAt(unit.currentCell.x, unit.currentCell.y);
     const flash = this.scene.add.image(start.x + 10, start.y - 66, "flash");
-    flash.setScale(0.55);
+    flash.setScale(weapon.flashScale);
+    flash.setTint(weapon.color);
     flash.setDepth(start.y + 90);
 
     const tracer = this.scene.add.graphics();
-    tracer.lineStyle(2, color, 0.95);
+    tracer.lineStyle(weapon.tracerWidth, weapon.color, 0.95);
     tracer.beginPath();
     tracer.moveTo(start.x + 8, start.y - 56);
     tracer.lineTo(end.x, end.y - 42);
     tracer.strokePath();
+    if (weapon.id === "breach-12") {
+      [-16, -7, 9, 18].forEach((offset) => {
+        tracer.lineStyle(1.1, weapon.color, 0.62);
+        tracer.beginPath();
+        tracer.moveTo(start.x + 8, start.y - 56);
+        tracer.lineTo(end.x + offset, end.y - 40 + offset * 0.12);
+        tracer.strokePath();
+      });
+    } else if (weapon.burst >= 4) {
+      [-6, 6].forEach((offset) => {
+        tracer.lineStyle(Math.max(1, weapon.tracerWidth - 0.6), weapon.color, 0.52);
+        tracer.beginPath();
+        tracer.moveTo(start.x + 8 + offset * 0.35, start.y - 56);
+        tracer.lineTo(end.x + offset, end.y - 42 + offset * 0.2);
+        tracer.strokePath();
+      });
+    }
     tracer.setDepth((start.y + end.y) / 2 + 80);
 
-    this.scene.time.delayedCall(60, () => {
+    this.scene.time.delayedCall(weapon.tracerLifeMs, () => {
       flash.destroy();
       tracer.destroy();
     });
@@ -260,12 +296,16 @@ export class CombatSystem {
     position: Phaser.Math.Vector2,
     smoke = false,
     miss = false,
-    level = 0
+    level = 0,
+    weapon?: WeaponDefinition
   ): void {
     const key = smoke ? "smoke" : "spark";
     const impact = this.scene.add.image(position.x, position.y - (smoke ? 28 : 44), key);
-    impact.setScale(smoke ? 0.9 : 0.7);
+    impact.setScale(smoke ? Math.max(0.9, weapon?.impactScale ?? 0.9) : weapon?.impactScale ?? 0.7);
     impact.setAlpha(miss ? 0.38 : 0.9);
+    if (weapon) {
+      impact.setTint(weapon.color);
+    }
     impact.setDepth(position.y + 88);
     this.scene.tweens.add({
       targets: impact,

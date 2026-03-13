@@ -1,37 +1,53 @@
 # Shardline Protocol
 
-Shardline Protocol is an original web-based cyber-SF isometric real-time squad tactics vertical slice built with Vite, TypeScript, and Phaser 3. It delivers a playable menu-to-mission-to-result loop with three missions, squad loadouts, research upgrades, settings, local save data, and browser smoke tests.
+Shardline Protocol is an original cyber-SF isometric real-time squad tactics vertical slice built with Vite, TypeScript, and Phaser 3. It currently ships a playable menu-to-mission-to-result loop with three missions, squad loadouts, research upgrades, field pickups, persistent saves, and browser smoke coverage.
 
-## What Is Included
+## Quick Start
 
-- Main menu, region map, squad prep, research/upgrades, tactical mission, result, and settings screens.
-- Three missions with distinct goals:
-  - `Glassline Cut`: eliminate a corporate courier target.
-  - `Quiet Relay`: rescue a scientist and escort them to extraction.
+Clone the repository first, then install dependencies and run the local dev server.
+
+```bash
+git clone https://github.com/SkyAicoding/Syndicate.git
+cd Syndicate
+npm install
+npx playwright install
+npm run dev -- --host 127.0.0.1 --port 4173
+```
+
+Default local URL: `http://127.0.0.1:4173`
+
+## Current Slice
+
+- Main menu, region map, squad prep, research, tactical mission, result, and settings screens are fully playable.
+- Three mission flows are implemented:
+  - `Glassline Cut`: eliminate a courier target.
+  - `Quiet Relay`: rescue a scientist and extract.
   - `Static Bloom`: sabotage a reactor terminal and escape.
-- Four controllable agents with persistent weapon loadouts and role abilities.
-- Real-time tactical controls:
-  - click or UI-select agents
-  - drag-select in the mission view
-  - right-click move / contextual attack
-  - regroup, hold position, abilities, medkits
-  - mission restart and abort-to-map controls
-  - keyboard camera pan, zoom, focus, hotkeys
-- State-driven enemy behavior with line-of-sight checks, civilian panic, destructible props, explosive barrels, alert phases, and mission event feeds.
-- Persistent progression in `localStorage`.
-- Playwright smoke tests covering boot, persistence, map/loadout flow, mission launch, selection, movement, combat, progression unlocks, retry, and abort screens.
+- Four agents persist across the campaign with deployment mode, control mode, starting weapon choice, and role abilities.
+- Weapon loop:
+  - base starting weapons: `Colt`, `Uiz`, `Breach-12`, `Assault Rifle`
+  - advanced field pickups: `Battle Rifle`, `PDW (P90)`, `Machine Gun`
+  - enemy-only weapons with separate profiles and drops
+  - ammo reserves, ammo crates, field armories, and enemy weapon drops
+- Tactical combat systems:
+  - left-click squad selection and move / attack orders
+  - double-click visible ally to select the visible squad
+  - right-click fallback move / interact
+  - regroup, hold, medkits, role abilities, restart, and abort
+  - keyboard camera pan, mouse-wheel zoom, floor-drag panning
+- Mission runtime includes line-of-sight, alert states, destructible props, enemy pressure / retreat logic, civilians, mission event feed, and result handling.
+- Progression persists in browser `localStorage`.
+- Playwright smoke tests cover boot, persistence, map/loadout flow, mission launch, movement, combat, retries, aborts, armory pickup, and ammo supply interactions.
 
 ## Run Commands
 
 ```bash
-npm install
-npx playwright install
 npm run dev
+npm run typecheck:strict
 npm run build
 npm run test:e2e
+npm run verify
 ```
-
-Default dev URL: `http://127.0.0.1:4173`
 
 ## Resume On Another PC
 
@@ -57,10 +73,15 @@ VITE_USE_GENERATED_ART=1 npm run dev -- --host 127.0.0.1 --port 4173
 
 ## Controls
 
-- `Left click`: select an agent
-- `Left drag`: box-select agents
-- `Right click`: move / attack / interact
-- `1-4`: select individual agents
+- `Left click`:
+  - select an ally
+  - with allies selected, click ground to move
+  - with allies selected, click an enemy to attack-move into that target
+- `Left drag`: pan the tactical floor
+- `Left double-click ally`: select the visible direct-control squad
+- `Right click`: fallback move / interact with ammo crates, armories, and dropped weapons
+- `Right drag`: pan the tactical floor
+- `1-4`: select direct-control agents
 - `G`: regroup selected agents
 - `H`: hold position toggle
 - `Q`: use selected agent ability
@@ -82,6 +103,11 @@ VITE_USE_GENERATED_ART=1 npm run dev -- --host 127.0.0.1 --port 4173
 - `public/sprites`: placeholder tilesheet and favicon
 - `tests`: Playwright smoke coverage
 - `docs`: art bible and first-slice asset plan
+
+## Development Status
+
+- Current status summary: [docs/development-status.md](docs/development-status.md)
+- Next-step plan: [docs/next-plan.md](docs/next-plan.md)
 
 ## Save Data
 
@@ -132,9 +158,10 @@ Verified locally:
 ## Files To Review First
 
 - `src/scenes/MissionScene.ts`
-- `src/core/App.ts`
+- `src/scenes/LoadoutScreen.ts`
 - `src/scenes/MissionScreen.ts`
 - `src/systems/CombatSystem.ts`
-- `src/systems/AISystem.ts`
-- `docs/art-bible.md`
-- `docs/asset-plan.md`
+- `src/systems/IsoMap.ts`
+- `src/data/weapons.ts`
+- `docs/development-status.md`
+- `docs/next-plan.md`

@@ -40,6 +40,10 @@ export class CameraController {
     maxY: 500
   };
 
+  private pointerDragStart: Phaser.Math.Vector2 | null = null;
+
+  private pointerDragOrigin: Phaser.Math.Vector2 | null = null;
+
   public constructor(scene: Phaser.Scene) {
     this.scene = scene;
     this.cursorKeys = scene.input.keyboard!.createCursorKeys();
@@ -60,16 +64,48 @@ export class CameraController {
     this.targetY = y;
   }
 
+  public jumpTo(x: number, y: number): void {
+    this.targetX = x;
+    this.targetY = y;
+    this.clampTargets();
+    const camera = this.scene.cameras.main;
+    camera.scrollX = this.targetX;
+    camera.scrollY = Phaser.Math.Clamp(
+      this.targetY + this.currentFloorBiasY,
+      this.bounds.minY,
+      this.bounds.maxY
+    );
+  }
+
   public setFloorFocus(level: number): void {
     this.targetFloorBiasY = level * 34;
     this.targetFloorZoomOffset = Math.min(0.08, level * 0.03);
   }
 
-  public update(deltaSeconds: number, edgeScroll: boolean): void {
+  public beginPointerDrag(screenX: number, screenY: number): void {
+    this.pointerDragStart = new Phaser.Math.Vector2(screenX, screenY);
+    this.pointerDragOrigin = new Phaser.Math.Vector2(this.targetX, this.targetY);
+  }
+
+  public dragPointerTo(screenX: number, screenY: number): void {
+    if (!this.pointerDragStart || !this.pointerDragOrigin) {
+      return;
+    }
+
+    const zoom = Math.max(this.scene.cameras.main.zoom, 0.001);
+    this.targetX = this.pointerDragOrigin.x - (screenX - this.pointerDragStart.x) / zoom;
+    this.targetY = this.pointerDragOrigin.y - (screenY - this.pointerDragStart.y) / zoom;
+    this.clampTargets();
+  }
+
+  public endPointerDrag(): void {
+    this.pointerDragStart = null;
+    this.pointerDragOrigin = null;
+  }
+
+  public update(deltaSeconds: number): void {
     const camera = this.scene.cameras.main;
-    const pointer = this.scene.input.activePointer;
     const speed = 620 * deltaSeconds / camera.zoom;
-    const padding = 26;
 
     if (this.cursorKeys.left.isDown || this.moveKeys.A.isDown) {
       this.targetX -= speed;
@@ -83,24 +119,7 @@ export class CameraController {
     if (this.cursorKeys.down.isDown || this.moveKeys.S.isDown) {
       this.targetY += speed;
     }
-
-    if (edgeScroll) {
-      if (pointer.x < padding) {
-        this.targetX -= speed * 0.9;
-      }
-      if (pointer.x > camera.width - padding) {
-        this.targetX += speed * 0.9;
-      }
-      if (pointer.y < padding) {
-        this.targetY -= speed * 0.9;
-      }
-      if (pointer.y > camera.height - padding) {
-        this.targetY += speed * 0.9;
-      }
-    }
-
-    this.targetX = Phaser.Math.Clamp(this.targetX, this.bounds.minX, this.bounds.maxX);
-    this.targetY = Phaser.Math.Clamp(this.targetY, this.bounds.minY, this.bounds.maxY);
+    this.clampTargets();
     this.currentFloorBiasY = Phaser.Math.Linear(this.currentFloorBiasY, this.targetFloorBiasY, 0.14);
     this.currentFloorZoomOffset = Phaser.Math.Linear(
       this.currentFloorZoomOffset,
@@ -123,5 +142,10 @@ export class CameraController {
       ),
       0.18
     );
+  }
+
+  private clampTargets(): void {
+    this.targetX = Phaser.Math.Clamp(this.targetX, this.bounds.minX, this.bounds.maxX);
+    this.targetY = Phaser.Math.Clamp(this.targetY, this.bounds.minY, this.bounds.maxY);
   }
 }

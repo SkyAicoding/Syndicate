@@ -21,6 +21,8 @@ interface AppBridge {
   forceMissionEnd: (success: boolean) => void;
   selectMissionAgent: (index: number) => void;
   moveSelectedAgent: (x: number, y: number) => void;
+  focusMissionCell: (x: number, y: number) => void;
+  interactMissionProp: (propId: string) => void;
 }
 
 declare global {
@@ -79,11 +81,21 @@ export class AppController {
       getMissionState: () => this.missionRuntime?.getTestState() ?? null,
       forceMissionEnd: (success) => this.missionRuntime?.forceEnd(success),
       selectMissionAgent: (index) => this.missionRuntime?.selectPlayerByIndex(index),
-      moveSelectedAgent: (x, y) => this.missionRuntime?.commandMoveSelected({ x, y })
+      moveSelectedAgent: (x, y) => this.missionRuntime?.commandMoveSelected({ x, y }),
+      focusMissionCell: (x, y) => this.missionRuntime?.focusCameraOnCell({ x, y }),
+      interactMissionProp: (propId) => this.missionRuntime?.interactWithProp(propId)
     };
 
     this.audio.applySettings(this.store.getState().settings);
     this.audio.setMusicMode("menu");
+
+    const autoStartMission = this.getAutoStartMission();
+    if (autoStartMission) {
+      this.store.setSelectedMission(autoStartMission);
+      this.navigate("mission");
+      return;
+    }
+
     this.navigate("menu");
   }
 
@@ -166,5 +178,13 @@ export class AppController {
 
   public setMissionRuntime(runtime: MissionRuntime | null): void {
     this.missionRuntime = runtime;
+  }
+
+  private getAutoStartMission(): MissionId | null {
+    const raw = new URLSearchParams(window.location.search).get("autostartMission");
+    if (raw === "m01" || raw === "m02" || raw === "m03") {
+      return raw;
+    }
+    return null;
   }
 }

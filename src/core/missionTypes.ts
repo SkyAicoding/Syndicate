@@ -2,6 +2,7 @@ import type {
   AbilityId,
   AgentControlMode,
   AgentRoleId,
+  AmmoType,
   MissionId,
   MissionResult,
   WeaponId
@@ -32,6 +33,9 @@ export interface HudUnitSnapshot {
   controlMode?: AgentControlMode;
   level: number;
   weaponId: WeaponId | null;
+  weaponName: string | null;
+  ammoType: AmmoType | null;
+  ammoReserve: number;
   currentHealth: number;
   maxHealth: number;
   pressure: number;

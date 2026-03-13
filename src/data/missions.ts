@@ -14,12 +14,13 @@ export const MISSIONS: Record<MissionId, MissionMeta> = {
     difficulty: "Moderate",
     reward: 320,
     briefing:
-      "An executive courier node is holding a live broker imprint in Spire Ward. Drop the escort, eliminate the courier, and fracture the board's local response web before it relocates.",
+      "A courier node in Spire Ward carries a live broker imprint. Drop the escort, eliminate the courier, and break the local response web before it relocates.",
     successText:
-      "The courier cell collapsed on-site. Shardline now owns the broker imprint and the ward slips into contested blackout.",
+      "The courier cell collapsed on-site. Shardline owns the broker imprint and the ward slips into blackout.",
     failureText:
-      "The target survived the strike window. Corporate traffic hardened and the ward's security lattice closed around the district.",
-    extractionRequired: false
+      "The target survived the strike window. Corporate traffic hardened and the ward sealed itself down.",
+    extractionRequired: false,
+    openingFocusCell: { x: 72, y: 52 }
   },
   m02: {
     id: "m02",
@@ -32,12 +33,13 @@ export const MISSIONS: Record<MissionId, MissionMeta> = {
     difficulty: "High",
     reward: 420,
     briefing:
-      "A defector systems biologist is being held inside an Aegis relay lab. Breach the complex, secure the scientist, and escort them to the extraction lift before the lab shutters.",
+      "A defector biologist is trapped in an Aegis relay lab. Breach the site, secure the scientist, and reach the extraction lift before lockdown shutters the floor.",
     successText:
-      "The scientist is out and their vault keys came with them. Aegis containment protocols are broken wide open.",
+      "The scientist is out and their vault keys came too. Aegis containment protocols are wide open.",
     failureText:
-      "The relay lab sealed or the asset was lost in the breach. No transfer, no leverage, and no route through Aegis data space.",
-    extractionRequired: true
+      "The lab sealed or the asset was lost in the breach. No transfer and no route through Aegis data space.",
+    extractionRequired: true,
+    openingFocusCell: { x: 20, y: 84 }
   },
   m03: {
     id: "m03",
@@ -50,12 +52,13 @@ export const MISSIONS: Record<MissionId, MissionMeta> = {
     difficulty: "Severe",
     reward: 520,
     briefing:
-      "A covert fabrication annex is producing counter-intrusion hardware. Plant a cascade on the reactor stack, survive the alert spike, and exfiltrate before the site locks down.",
+      "A covert annex is producing counter-intrusion hardware. Plant a cascade on the reactor stack, survive the alert spike, and exfiltrate before the site locks down.",
     successText:
-      "The annex is dark, the fabricators are slag, and the blackout ripple is spreading through the Verge logistics spine.",
+      "The annex is dark, the fabricators are slag, and the blackout ripple is spreading through the Verge spine.",
     failureText:
-      "The cascade failed or the team was trapped in the shutdown grid. The site remains online and the Verge stays hostile.",
-    extractionRequired: true
+      "The cascade failed or the team was trapped in the shutdown grid. The site stays online and the Verge stays hostile.",
+    extractionRequired: true,
+    openingFocusCell: { x: 20, y: 84 }
   }
 };
 

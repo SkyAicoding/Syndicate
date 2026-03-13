@@ -10,7 +10,36 @@ export type ScreenId =
 export type MissionId = "m01" | "m02" | "m03";
 export type RegionStatus = "locked" | "contested" | "secured";
 export type RegionId = "spire" | "aegis" | "blacksite";
-export type WeaponId = "pistol" | "smg" | "shotgun" | "rifle";
+export type WeaponId =
+  | "colt"
+  | "uiz"
+  | "breach-12"
+  | "assault-rifle"
+  | "battle-rifle"
+  | "sniper-rifle"
+  | "machine-gun"
+  | "pdw-90"
+  | "anti-materiel-rifle"
+  | "enemy-sidearm"
+  | "enemy-needler"
+  | "enemy-carbine"
+  | "enemy-lancer"
+  | "enemy-suppressor";
+export type AmmoType =
+  | "light"
+  | "smg"
+  | "shell"
+  | "assault"
+  | "battle"
+  | "sniper"
+  | "belt"
+  | "pdw"
+  | "anti-materiel"
+  | "needle"
+  | "carbine"
+  | "lance"
+  | "suppressor";
+export type WeaponFaction = "player" | "enemy";
 export type UtilityId = "medkit";
 export type AgentControlMode = "manual" | "assist";
 export type AgentRoleId =
@@ -38,6 +67,8 @@ export type ObjectiveKind = "eliminate" | "rescue" | "sabotage";
 export interface WeaponDefinition {
   id: WeaponId;
   name: string;
+  faction: WeaponFaction;
+  loadoutAvailable: boolean;
   damage: number;
   range: number;
   rate: number;
@@ -45,8 +76,18 @@ export interface WeaponDefinition {
   pressure: number;
   spread: number;
   burst: number;
+  ammoType: AmmoType;
+  ammoPerAttack: number;
+  startingAmmo: number;
+  pickupAmmo: number;
+  dropAmmo: number;
   movePenalty: number;
+  propDamageMultiplier: number;
   color: number;
+  flashScale: number;
+  tracerWidth: number;
+  tracerLifeMs: number;
+  impactScale: number;
   description: string;
 }
 
@@ -86,6 +127,7 @@ export interface MissionMeta {
   successText: string;
   failureText: string;
   extractionRequired: boolean;
+  openingFocusCell?: { x: number; y: number };
 }
 
 export interface SettingsState {

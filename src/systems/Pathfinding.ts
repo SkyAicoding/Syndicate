@@ -1,5 +1,8 @@
 import type { GridPos } from "../core/missionTypes";
 
+const STRAIGHT_COST = 1;
+const DIAGONAL_COST = 1.4;
+
 const directions: GridPos[] = [
   { x: 1, y: 0 },
   { x: -1, y: 0 },
@@ -11,8 +14,13 @@ const directions: GridPos[] = [
   { x: 1, y: -1 }
 ];
 
-const heuristic = (a: GridPos, b: GridPos): number =>
-  Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+const heuristic = (a: GridPos, b: GridPos): number => {
+  const dx = Math.abs(a.x - b.x);
+  const dy = Math.abs(a.y - b.y);
+  const diagonalSteps = Math.min(dx, dy);
+  const straightSteps = Math.max(dx, dy) - diagonalSteps;
+  return diagonalSteps * DIAGONAL_COST + straightSteps * STRAIGHT_COST;
+};
 
 const keyOf = (x: number, y: number): string => `${x},${y}`;
 
@@ -80,7 +88,9 @@ export class Pathfinding {
       getNeighbors(current).forEach((next) => {
         const isDiagonal = current.x !== next.x && current.y !== next.y;
         const nextKey = keyOf(next.x, next.y);
-        const newCost = (costSoFar.get(keyOf(current.x, current.y)) ?? 0) + (isDiagonal ? 1.4 : 1);
+        const newCost =
+          (costSoFar.get(keyOf(current.x, current.y)) ?? 0) +
+          (isDiagonal ? DIAGONAL_COST : STRAIGHT_COST);
 
         if (!costSoFar.has(nextKey) || newCost < (costSoFar.get(nextKey) ?? Number.MAX_VALUE)) {
           costSoFar.set(nextKey, newCost);

@@ -13,8 +13,6 @@ export class MissionScreen implements Screen {
 
   private runtime: MissionRuntime | null = null;
 
-  private snapshot: MissionSnapshot | null = null;
-
   private viewportEl!: HTMLDivElement;
 
   private objectiveEl!: HTMLParagraphElement;
@@ -76,8 +74,8 @@ export class MissionScreen implements Screen {
               <div class="mission-feed" data-slot="events"></div>
               <p class="eyebrow">Controls</p>
               <p class="mission-copy">
-                Left click or drag to select. Right click to move or attack. WASD / arrows pan. Mouse wheel zooms.
-                Keys: 1-4 select agent, G regroup, H hold, Q ability, Space center, F1 debug.
+                Left drag pans the floor, double-clicking a visible ally selects every visible squadmate, and left click selects allies or sends the selected squad to move on the ground or push into hostile targets while attacking.
+                Right click still sends the squad to a destination or interacts with ammo crates, armories, and dropped weapons, right-drag also pans the floor, mouse wheel zooms, and WASD / arrows still nudge the camera.
               </p>
               <canvas width="200" height="200" class="mission-minimap" data-slot="minimap"></canvas>
             </div>
@@ -154,7 +152,6 @@ export class MissionScreen implements Screen {
   }
 
   private renderSnapshot(snapshot: MissionSnapshot): void {
-    this.snapshot = snapshot;
     this.objectiveEl.textContent = snapshot.objectiveText;
     this.phaseEl.textContent = snapshot.phaseLabel;
     this.floorEl.textContent = `Deck ${snapshot.focusFloor + 1}`;
@@ -173,7 +170,7 @@ export class MissionScreen implements Screen {
                   <span>${Math.round(unit.currentHealth)}/${unit.maxHealth} HP</span>
                 </div>
                 <div class="tactical-card__chips">${this.renderUnitChips(unit)}</div>
-                <span>${unit.weaponId ?? "unarmed"} // ${unit.pressure} pressure</span>
+                <span>${unit.weaponName ?? unit.weaponId ?? "unarmed"} // ${unit.ammoReserve} ammo // ${unit.pressure} pressure</span>
                 <div class="tactical-card__actions">
                   ${
                     unit.abilityId
@@ -186,10 +183,10 @@ export class MissionScreen implements Screen {
             `
           )
           .join("")
-      : `<p class="muted">Select an agent or drag a box across the squad.</p>`;
+      : `<p class="muted">Select an agent, double-click a visible ally to grab the whole visible squad, or issue a move order with the selected team.</p>`;
 
     this.squadEl.innerHTML = snapshot.squad
-      .map((unit, index) => {
+      .map((unit) => {
         const manualIndex = snapshot.squad
           .filter((candidate) => candidate.controlMode !== "assist")
           .findIndex((candidate) => candidate.id === unit.id);
@@ -205,7 +202,7 @@ export class MissionScreen implements Screen {
               <span>${Math.round(unit.currentHealth)}/${unit.maxHealth} HP</span>
             </div>
             <div class="tactical-card__chips">${this.renderUnitChips(unit)}</div>
-            <span>${unit.weaponId ?? "unarmed"} // ${unit.pressure} pressure</span>
+            <span>${unit.weaponName ?? unit.weaponId ?? "unarmed"} // ${unit.ammoReserve} ammo // ${unit.pressure} pressure</span>
           </button>
         `;
       })

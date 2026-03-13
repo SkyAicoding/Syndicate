@@ -39,6 +39,15 @@ interface FloorRenderable {
   type: "surface" | "detail" | "transition" | "face" | "overlay" | "ceiling";
 }
 
+interface FaceOccluder {
+  bounds: Phaser.Geom.Rectangle;
+  level: number;
+  polygon: Phaser.Geom.Polygon;
+}
+
+const SURFACE_DEPTH_OFFSET = 10_000;
+const BLOCKED_TRAVERSAL = 3;
+
 export class IsoMap {
   public readonly width: number;
 
@@ -63,6 +72,8 @@ export class IsoMap {
   private readonly elevatorLinks = new Map<string, GridPos[]>();
 
   private readonly floorRenderables: FloorRenderable[] = [];
+
+  private readonly faceOccluders: FaceOccluder[] = [];
 
   private focusedFloor = -1;
 
@@ -146,6 +157,22 @@ export class IsoMap {
       5: "tile-industrial",
       6: "tile-hazard"
     };
+    const accentKeys: Partial<Record<number, string>> = {
+      1: "tile-mark-road",
+      2: "tile-mark-sidewalk",
+      3: "tile-mark-plaza",
+      4: "tile-mark-plaza",
+      5: "tile-mark-industrial",
+      6: "tile-mark-industrial"
+    };
+    const accentAlpha: Partial<Record<number, number>> = {
+      1: 0.34,
+      2: 0.24,
+      3: 0.18,
+      4: 0.18,
+      5: 0.22,
+      6: 0.28
+    };
 
     for (let y = 0; y < this.height; y += 1) {
       for (let x = 0; x < this.width; x += 1) {
@@ -162,8 +189,19 @@ export class IsoMap {
         const groundKey = tileKeys[groundId] ?? "tile-sidewalk";
         const tile = this.scene.add.image(world.x, world.y, groundKey);
         tile.setOrigin(0.5, 0.5);
-        tile.setDepth(world.y);
+        tile.setDepth(this.getSurfaceDepth(world.y));
         this.registerFloorRenderable(level, [tile], "surface", 1, cell);
+
+        const accentKey = accentKeys[groundId] ?? null;
+        if (accentKey) {
+          const accent = this.scene.add.image(world.x, world.y - 0.5, accentKey);
+          const baseAccentAlpha = accentAlpha[groundId] ?? 0.18;
+          accent.setOrigin(0.5, 0.5);
+          accent.setDepth(this.getSurfaceDepth(world.y, 0.08));
+          accent.setBlendMode(Phaser.BlendModes.SCREEN);
+          accent.setAlpha(baseAccentAlpha);
+          this.registerFloorRenderable(level, [accent], "detail", baseAccentAlpha, cell);
+        }
 
         if (level > 0) {
           const overlayKey = this.isInteriorFloorCell(x, y, level)
@@ -172,7 +210,7 @@ export class IsoMap {
           const overlayAlpha = overlayKey === "tile-overlay-interior" ? 0.58 : 0.34;
           const overlay = this.scene.add.image(world.x, world.y - 1, overlayKey);
           overlay.setOrigin(0.5, 0.5);
-          overlay.setDepth(world.y + 0.16);
+          overlay.setDepth(this.getSurfaceDepth(world.y, 0.16));
           overlay.setBlendMode(Phaser.BlendModes.SCREEN);
           overlay.setAlpha(overlayAlpha);
           this.registerFloorRenderable(level, [overlay], "overlay", overlayAlpha, cell);
@@ -181,7 +219,7 @@ export class IsoMap {
         if (level > 0 && this.isInteriorFloorCell(x, y, level)) {
           const ceiling = this.scene.add.image(world.x, world.y - 2, "tile-ceiling-panel");
           ceiling.setOrigin(0.5, 0.5);
-          ceiling.setDepth(world.y + 0.18);
+          ceiling.setDepth(this.getSurfaceDepth(world.y, 0.18));
           ceiling.setAlpha(0.92);
           this.registerFloorRenderable(level, [ceiling], "ceiling", 0.92, cell);
         }
@@ -194,7 +232,7 @@ export class IsoMap {
             tileKeys[detailId] ?? "tile-plaza"
           );
           detailTile.setOrigin(0.5, 0.5);
-          detailTile.setDepth(world.y + 0.2);
+          detailTile.setDepth(this.getSurfaceDepth(world.y, 0.2));
           detailTile.setAlpha(0.66);
           detailTile.setBlendMode(Phaser.BlendModes.SCREEN);
           this.registerFloorRenderable(level, [detailTile], "detail", 0.66, cell);
@@ -203,11 +241,11 @@ export class IsoMap {
         const traversalMode = this.getTraversalAt(x, y);
         if (traversalMode === 1) {
           const stairs = this.scene.add.image(world.x, world.y - 6, "nav-stairs");
-          stairs.setDepth(world.y + 14);
+          stairs.setDepth(this.getSurfaceDepth(world.y, 14));
           this.registerFloorRenderable(level, [stairs], "transition", 1, cell);
         } else if (traversalMode === 2) {
           const elevator = this.scene.add.image(world.x, world.y - 8, "nav-elevator");
-          elevator.setDepth(world.y + 14);
+          elevator.setDepth(this.getSurfaceDepth(world.y, 14));
           this.registerFloorRenderable(level, [elevator], "transition", 1, cell);
         }
       }
@@ -237,8 +275,8 @@ export class IsoMap {
     let best = origin;
     let bestDistance = Number.POSITIVE_INFINITY;
 
-    for (let y = origin.y - 3; y <= origin.y + 3; y += 1) {
-      for (let x = origin.x - 3; x <= origin.x + 3; x += 1) {
+    for (let y = origin.y - 5; y <= origin.y + 5; y += 1) {
+      for (let x = origin.x - 5; x <= origin.x + 5; x += 1) {
         if (!this.inBounds(x, y) || !this.isPlayableCell(x, y)) {
           continue;
         }
@@ -256,7 +294,7 @@ export class IsoMap {
   }
 
   public isPlayableCell(x: number, y: number): boolean {
-    return this.inBounds(x, y) && this.ground[y][x] > 0;
+    return this.inBounds(x, y) && this.ground[y][x] > 0 && this.traversal[y][x] !== BLOCKED_TRAVERSAL;
   }
 
   public getElevationAt(x: number, y: number): number {
@@ -277,7 +315,8 @@ export class IsoMap {
   }
 
   public isTransitionCell(x: number, y: number): boolean {
-    return this.getTraversalAt(x, y) > 0;
+    const traversalMode = this.getTraversalAt(x, y);
+    return traversalMode === 1 || traversalMode === 2;
   }
 
   public getTraversalNeighbors(
@@ -401,21 +440,48 @@ export class IsoMap {
       return target;
     }
 
-    for (let radius = 1; radius < 14; radius += 1) {
+    for (let radius = 1; radius < 24; radius += 1) {
+      let bestCandidate: GridPos | null = null;
+      let bestDistance = Number.POSITIVE_INFINITY;
+
       for (let y = target.y - radius; y <= target.y + radius; y += 1) {
         for (let x = target.x - radius; x <= target.x + radius; x += 1) {
-          if (!this.inBounds(x, y)) {
+          if (
+            !this.inBounds(x, y) ||
+            (Math.abs(x - target.x) !== radius && Math.abs(y - target.y) !== radius)
+          ) {
             continue;
           }
 
-          if (isWalkable(x, y)) {
-            return { x, y };
+          if (!isWalkable(x, y)) {
+            continue;
+          }
+
+          const distance = Phaser.Math.Distance.Squared(target.x, target.y, x, y);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            bestCandidate = { x, y };
           }
         }
+      }
+
+      if (bestCandidate) {
+        return bestCandidate;
       }
     }
 
     return target;
+  }
+
+  public isBodyOccluded(worldPosition: Phaser.Math.Vector2, level: number): boolean {
+    const samplePoint = new Phaser.Geom.Point(worldPosition.x, worldPosition.y - 42);
+
+    return this.faceOccluders.some(
+      (occluder) =>
+        occluder.level > level &&
+        occluder.bounds.contains(samplePoint.x, samplePoint.y) &&
+        Phaser.Geom.Polygon.Contains(occluder.polygon, samplePoint.x, samplePoint.y)
+    );
   }
 
   public getDirectionalCoverBonus(
@@ -468,6 +534,18 @@ export class IsoMap {
     const rightNeighbor = this.getElevationAt(cell.x + 1, cell.y);
 
     if (level > leftNeighbor) {
+      this.registerFaceOccluder(
+        [
+          { x: world.x - TILE_WIDTH / 2, y: world.y },
+          { x: world.x, y: world.y + TILE_HEIGHT / 2 },
+          { x: world.x, y: world.y + TILE_HEIGHT / 2 + (level - leftNeighbor) * LEVEL_HEIGHT },
+          {
+            x: world.x - TILE_WIDTH / 2,
+            y: world.y + (level - leftNeighbor) * LEVEL_HEIGHT
+          }
+        ],
+        level
+      );
       const face = this.drawFace(
         [
           { x: world.x - TILE_WIDTH / 2, y: world.y },
@@ -485,6 +563,18 @@ export class IsoMap {
     }
 
     if (level > rightNeighbor) {
+      this.registerFaceOccluder(
+        [
+          { x: world.x + TILE_WIDTH / 2, y: world.y },
+          { x: world.x, y: world.y + TILE_HEIGHT / 2 },
+          { x: world.x, y: world.y + TILE_HEIGHT / 2 + (level - rightNeighbor) * LEVEL_HEIGHT },
+          {
+            x: world.x + TILE_WIDTH / 2,
+            y: world.y + (level - rightNeighbor) * LEVEL_HEIGHT
+          }
+        ],
+        level
+      );
       const face = this.drawFace(
         [
           { x: world.x + TILE_WIDTH / 2, y: world.y },
@@ -506,18 +596,79 @@ export class IsoMap {
     points: Array<{ x: number; y: number }>,
     depth: number,
     fillColor: number
-  ): Phaser.GameObjects.Polygon {
-    const polygon = this.scene.add.polygon(
-      0,
-      0,
-      points.flatMap((point) => [point.x, point.y]),
-      fillColor,
-      0.96
+  ): Phaser.GameObjects.Graphics {
+    const [topLeft, topRight, bottomRight, bottomLeft] = points;
+    const graphics = this.scene.add.graphics();
+    const faceHeight = Math.max(bottomLeft.y - topLeft.y, bottomRight.y - topRight.y);
+    const bandCount = Phaser.Math.Clamp(Math.round(faceHeight / 24), 2, 5);
+
+    graphics.setDepth(depth);
+    graphics.fillStyle(fillColor, 0.96);
+    graphics.beginPath();
+    graphics.moveTo(topLeft.x, topLeft.y);
+    points.slice(1).forEach((point) => graphics.lineTo(point.x, point.y));
+    graphics.closePath();
+    graphics.fillPath();
+
+    graphics.lineStyle(1, 0xb9ebff, 0.08);
+    graphics.beginPath();
+    graphics.moveTo(topLeft.x, topLeft.y);
+    points.slice(1).forEach((point) => graphics.lineTo(point.x, point.y));
+    graphics.closePath();
+    graphics.strokePath();
+
+    graphics.lineStyle(3, 0x050b10, 0.14);
+    graphics.strokeLineShape(
+      new Phaser.Geom.Line(bottomLeft.x, bottomLeft.y, bottomRight.x, bottomRight.y)
     );
-    polygon.setOrigin(0, 0);
-    polygon.setDepth(depth);
-    polygon.setStrokeStyle(1, 0x7acfff, 0.07);
-    return polygon;
+
+    for (let index = 1; index <= bandCount; index += 1) {
+      const t = index / (bandCount + 1);
+      const left = new Phaser.Math.Vector2(
+        Phaser.Math.Linear(topLeft.x, bottomLeft.x, t),
+        Phaser.Math.Linear(topLeft.y, bottomLeft.y, t)
+      );
+      const right = new Phaser.Math.Vector2(
+        Phaser.Math.Linear(topRight.x, bottomRight.x, t),
+        Phaser.Math.Linear(topRight.y, bottomRight.y, t)
+      );
+      const glowStart = new Phaser.Math.Vector2(
+        Phaser.Math.Linear(left.x, right.x, 0.18),
+        Phaser.Math.Linear(left.y, right.y, 0.18)
+      );
+      const glowEnd = new Phaser.Math.Vector2(
+        Phaser.Math.Linear(left.x, right.x, 0.62),
+        Phaser.Math.Linear(left.y, right.y, 0.62)
+      );
+
+      graphics.lineStyle(2, 0x061118, 0.18);
+      graphics.strokeLineShape(new Phaser.Geom.Line(left.x, left.y, right.x, right.y));
+      graphics.lineStyle(2, 0x8befff, 0.08);
+      graphics.strokeLineShape(
+        new Phaser.Geom.Line(glowStart.x, glowStart.y, glowEnd.x, glowEnd.y)
+      );
+    }
+
+    [0.18, 0.82].forEach((t) => {
+      const start = new Phaser.Math.Vector2(
+        Phaser.Math.Linear(topLeft.x, topRight.x, t),
+        Phaser.Math.Linear(topLeft.y, topRight.y, t)
+      );
+      const end = new Phaser.Math.Vector2(
+        Phaser.Math.Linear(bottomLeft.x, bottomRight.x, t),
+        Phaser.Math.Linear(bottomLeft.y, bottomRight.y, t)
+      );
+
+      graphics.lineStyle(1, 0xffffff, 0.05);
+      graphics.strokeLineShape(new Phaser.Geom.Line(start.x, start.y, end.x, end.y));
+    });
+
+    return graphics;
+  }
+
+  private getSurfaceDepth(worldY: number, offset = 0): number {
+    // Keep floor art beneath moving units so filled tile textures do not clip their feet.
+    return worldY - SURFACE_DEPTH_OFFSET + offset;
   }
 
   private addElevatorLink(from: GridPos, to: GridPos): void {
@@ -541,6 +692,17 @@ export class IsoMap {
       baseAlpha,
       cell
     });
+  }
+
+  private registerFaceOccluder(points: Array<{ x: number; y: number }>, level: number): void {
+    const polygon = new Phaser.Geom.Polygon(points.map((point) => new Phaser.Geom.Point(point.x, point.y)));
+    const bounds = new Phaser.Geom.Rectangle(
+      Math.min(...points.map((point) => point.x)),
+      Math.min(...points.map((point) => point.y)),
+      Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x)),
+      Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y))
+    );
+    this.faceOccluders.push({ bounds, level, polygon });
   }
 
   private getFloorAlpha(
@@ -573,12 +735,12 @@ export class IsoMap {
       return type === "ceiling"
         ? 0.03
         : type === "overlay"
-          ? 0.04
+          ? 0.16
           : type === "face"
-            ? 0.22
+            ? 0.58
             : type === "detail"
-              ? 0.14
-              : 0.16;
+              ? 0.3
+              : 0.38;
     }
 
     return type === "ceiling"

@@ -30,14 +30,14 @@ export class WorldMapScreen implements Screen {
     container.innerHTML = `
       <section class="screen screen--world" data-testid="world-map-screen">
         <header class="screen-header">
-          <div>
+          <div class="screen-header__copy">
             <p class="eyebrow">Region map</p>
             <h1>Strike routing</h1>
           </div>
           <div class="header-actions">
-            <span class="resource-pill">${formatCredits(state.credits)}</span>
-            <button class="button button--ghost" data-action="menu">Main Menu</button>
-            <button class="button button--ghost" data-action="settings">Settings</button>
+            <span class="resource-pill"><span class="resource-pill__value">${formatCredits(state.credits)}</span></span>
+            <button class="button button--ghost world-header-button" data-action="menu"><span class="button__label">Main Menu</span></button>
+            <button class="button button--ghost world-header-button" data-action="settings"><span class="button__label">Settings</span></button>
           </div>
         </header>
         <div class="world-layout">
@@ -49,8 +49,8 @@ export class WorldMapScreen implements Screen {
                     <button class="region-node region-node--${
                       state.regionControl[regionId as keyof typeof REGION_ART]
                     }">
-                      <span>${name}</span>
-                      <strong>${
+                      <span class="region-node__name">${name}</span>
+                      <strong class="region-node__status">${
                         state.regionControl[regionId as keyof typeof REGION_ART]
                       }</strong>
                     </button>
@@ -59,18 +59,20 @@ export class WorldMapScreen implements Screen {
                 .join("")}
             </div>
             <div class="briefing-panel">
-              <p class="eyebrow">Operational summary</p>
-              <h2>${selectedMission.name}</h2>
-              <p>${selectedMission.briefing}</p>
-              <div class="detail-grid">
-                <div><span class="label">Region</span><strong>${selectedMission.regionName}</strong></div>
-                <div><span class="label">Objective</span><strong>${selectedMission.objectiveKind}</strong></div>
-                <div><span class="label">Difficulty</span><strong>${selectedMission.difficulty}</strong></div>
-                <div><span class="label">Reward</span><strong>${formatCredits(selectedMission.reward)}</strong></div>
-              </div>
-              <div class="panel-actions">
-                <button class="button button--primary" data-action="prep" data-testid="open-loadout-button">Open Squad Prep</button>
-                <button class="button" data-action="research">Research & Upgrades</button>
+              <div class="briefing-panel__content">
+                <p class="eyebrow">Operational summary</p>
+                <h2>${selectedMission.name}</h2>
+                <p class="screen-copy">${selectedMission.briefing}</p>
+                <div class="detail-grid">
+                  <div class="detail-card"><span class="label">Region</span><strong>${selectedMission.regionName}</strong></div>
+                  <div class="detail-card"><span class="label">Objective</span><strong>${selectedMission.objectiveKind}</strong></div>
+                  <div class="detail-card"><span class="label">Difficulty</span><strong>${selectedMission.difficulty}</strong></div>
+                  <div class="detail-card"><span class="label">Reward</span><strong>${formatCredits(selectedMission.reward)}</strong></div>
+                </div>
+                <div class="panel-actions">
+                  <button class="button button--primary world-action-button" data-action="prep" data-testid="open-loadout-button"><span class="button__label">Open Squad Prep</span></button>
+                  <button class="button world-action-button" data-action="research"><span class="button__label">Research & Upgrades</span></button>
+                </div>
               </div>
             </div>
           </div>
@@ -92,8 +94,8 @@ export class WorldMapScreen implements Screen {
                     <span class="mission-card__status ${isComplete ? "is-complete" : ""}">
                       ${isComplete ? "Secured" : isUnlocked ? "Open" : "Locked"}
                     </span>
-                    <strong>${mission.name}</strong>
-                    <span>${mission.statusLabel}</span>
+                    <strong class="mission-card__title">${mission.name}</strong>
+                    <span class="mission-card__subtitle">${mission.statusLabel}</span>
                   </button>
                 `;
               })

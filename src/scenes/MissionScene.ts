@@ -13,13 +13,15 @@ import type {
 } from "../core/missionTypes";
 import type {
   AgentDefinition,
+  AmmoType,
   CampaignState,
   MissionId,
   MissionResult,
   WeaponId
 } from "../data/types";
 import { MISSIONS } from "../data/missions";
-import { Prop, type PropKind } from "../entities/Prop";
+import { WEAPONS, resolveWeaponId } from "../data/weapons";
+import { Prop, type PropKind, type PropVariant } from "../entities/Prop";
 import { Unit } from "../entities/Unit";
 import { AISystem } from "../systems/AISystem";
 import { CameraController } from "../systems/CameraController";
@@ -59,6 +61,39 @@ const roleTexture = (agent: AgentDefinition): string => {
   }
 };
 
+const getEnemyTextureForWeapon = (weaponId: WeaponId): string => {
+  if (weaponId === "enemy-needler" || weaponId === "uiz" || weaponId === "pdw-90") {
+    return "unit-enemy-smg";
+  }
+
+  if (weaponId === "breach-12") {
+    return "unit-enemy-shotgun";
+  }
+
+  return "unit-enemy-rifle";
+};
+
+const getEnemyProfileForWeapon = (weaponId: WeaponId): {
+  maxHealth: number;
+  armor: number;
+  accuracy: number;
+  moveSpeed: number;
+  vision: number;
+} => {
+  switch (weaponId) {
+    case "enemy-lancer":
+    case "sniper-rifle":
+      return { maxHealth: 70, armor: 1, accuracy: 0.8, moveSpeed: 170, vision: 7.2 };
+    case "enemy-suppressor":
+    case "machine-gun":
+      return { maxHealth: 78, armor: 2, accuracy: 0.7, moveSpeed: 168, vision: 6.8 };
+    case "enemy-needler":
+      return { maxHealth: 66, armor: 1, accuracy: 0.72, moveSpeed: 182, vision: 6.3 };
+    default:
+      return { maxHealth: 68, armor: 1, accuracy: 0.76, moveSpeed: 176, vision: 6.5 };
+  }
+};
+
 const getCellFromObject = (object: TiledObjectData): GridPos => ({
   x: Number(object.properties.gridX ?? 0),
   y: Number(object.properties.gridY ?? 0)
@@ -75,6 +110,14 @@ const getPatrolPath = (object: TiledObjectData): GridPos[] => {
     return { x, y };
   });
 };
+
+type PointerDragMode = "primary" | "secondary" | "camera";
+
+const POINTER_DRAG_THRESHOLD = 10;
+
+const DOUBLE_CLICK_THRESHOLD = 420;
+
+const PRIMARY_CAMERA_DRAG_THRESHOLD = 30;
 
 export class MissionScene extends Phaser.Scene {
   private readonly configData: MissionSceneConfig;
@@ -115,11 +158,15 @@ export class MissionScene extends Phaser.Scene {
 
   private commandMarker!: Phaser.GameObjects.Image;
 
+  private attackMarker!: Phaser.GameObjects.Image;
+
   private dragGraphics!: Phaser.GameObjects.Graphics;
 
   private debugGraphics!: Phaser.GameObjects.Graphics;
 
   private dragStart: Phaser.Math.Vector2 | null = null;
+
+  private dragMode: PointerDragMode | null = null;
 
   private snapshotElapsed = 0;
 
@@ -160,6 +207,22 @@ export class MissionScene extends Phaser.Scene {
   private readonly interactionOrders = new Map<string, string>();
 
   private vergePrimePromptShown = false;
+
+  private lastPointerGesture: {
+    mode: PointerDragMode | "none";
+    distance: number;
+    commandIssued: boolean;
+    action: string;
+  } = {
+    mode: "none",
+    distance: 0,
+    commandIssued: false,
+    action: "none"
+  };
+
+  private lastPrimaryClickPlayerId: string | null = null;
+
+  private lastPrimaryClickTime = 0;
 
   public constructor(config: MissionSceneConfig) {
     super({ key: "MissionScene" });
@@ -210,9 +273,9 @@ export class MissionScene extends Phaser.Scene {
     const fallbackAlive = this.playerUnits.filter((unit) => unit.alive);
     if (firstAlive.length) {
       this.selectUnits([firstAlive[0]]);
-      this.centerCameraOn(this.getSquadCentroid());
+      this.centerCameraOn(this.getOpeningCameraTarget());
     } else if (fallbackAlive.length) {
-      this.centerCameraOn(this.getSquadCentroid());
+      this.centerCameraOn(this.getOpeningCameraTarget());
     }
 
     const bounds = this.map.getWorldBounds();
@@ -249,7 +312,7 @@ export class MissionScene extends Phaser.Scene {
     );
     this.maintainPlayerAttackOrders();
     this.combatSystem.update(this.units, this.props, now);
-    this.cameraController.update(deltaSeconds, this.configData.campaign.settings.edgeScroll);
+    this.cameraController.update(deltaSeconds);
     this.updateMissionState(now);
     this.updateMarkers(now);
 
@@ -387,13 +450,45 @@ export class MissionScene extends Phaser.Scene {
     this.issueMoveCommand(cell);
   }
 
+  public interactWithProp(propId: string): void {
+    const prop = this.props.find((candidate) => candidate.id === propId);
+    if (!prop || !prop.canInteract()) {
+      return;
+    }
+
+    const unit =
+      this.selectedUnits[0] ??
+      this.playerUnits.find((candidate) => candidate.alive && candidate.controlMode === "manual");
+    if (!unit) {
+      return;
+    }
+
+    this.activateInteraction(prop, unit);
+  }
+
+  public focusCameraOnCell(cell: GridPos): void {
+    const world = this.map.gridToWorld(cell);
+    this.cameraController.jumpTo(
+      world.x - this.scale.width / 2,
+      world.y - this.scale.height / 2
+    );
+  }
+
   public getTestState(): Record<string, unknown> {
     const camera = this.cameras.main;
+    const screenPointForWorld = (world: Phaser.Math.Vector2) => ({
+      x: (world.x - camera.scrollX) * camera.zoom,
+      y: (world.y - camera.scrollY) * camera.zoom
+    });
     const screenPoint = (unit: Unit) => {
+      const world = unit.getWorldPosition();
+      return screenPointForWorld(world);
+    };
+    const selectionPoint = (unit: Unit) => {
       const world = unit.getWorldPosition();
       return {
         x: (world.x - camera.scrollX) * camera.zoom,
-        y: (world.y - camera.scrollY) * camera.zoom
+        y: (world.y - 42 - camera.scrollY) * camera.zoom
       };
     };
 
@@ -402,13 +497,20 @@ export class MissionScene extends Phaser.Scene {
       objective: this.director.getObjectiveText(),
       phaseLabel: this.phaseLabel,
       alertLevel: this.alertLevel,
+      lastInput: this.lastPointerGesture,
       selectedIds: this.selectedUnits.map((unit) => unit.id),
       players: this.playerUnits.map((unit) => ({
         id: unit.id,
         label: unit.label,
+        weaponId: unit.weaponId,
+        weaponName: unit.getActiveWeapon()?.name ?? null,
+        ammoReserve: unit.getAmmoReserve(),
         controlMode: unit.controlMode,
+        brainState: unit.brainState,
+        pathLength: unit.movePath.length,
         cell: unit.currentCell,
         screen: screenPoint(unit),
+        selectScreen: selectionPoint(unit),
         hp: unit.currentHealth,
         maxHp: unit.maxHealth,
         alive: unit.alive
@@ -417,11 +519,22 @@ export class MissionScene extends Phaser.Scene {
         .filter((unit) => unit.side === "enemy")
         .map((unit) => ({
           id: unit.id,
+          weaponId: unit.weaponId,
+          weaponName: unit.getActiveWeapon()?.name ?? null,
+          ammoReserve: unit.getAmmoReserve(),
           cell: unit.currentCell,
           screen: screenPoint(unit),
           hp: unit.currentHealth,
           maxHp: unit.maxHealth,
           alive: unit.alive
+        })),
+      interactives: this.props
+        .filter((prop) => prop.canInteract())
+        .map((prop) => ({
+          id: prop.id,
+          kind: prop.kind,
+          cell: prop.cell,
+          screen: screenPointForWorld(new Phaser.Math.Vector2(prop.image.x, prop.image.y))
         })),
       objectiveCells: {
         extract: this.extractCells,
@@ -452,18 +565,32 @@ export class MissionScene extends Phaser.Scene {
 
       if (object.type.startsWith("prop_")) {
         const kind = object.type.replace("prop_", "") as PropKind;
+        const hasProperty = (key: string) =>
+          Object.prototype.hasOwnProperty.call(object.properties, key);
         this.props.push(
           new Prop(this, this.map, {
             id: `${object.type}-${object.id}`,
             kind,
             cell,
-            objective: Boolean(object.properties.objective),
-            interactive: Boolean(object.properties.interactive),
+            variant: object.properties.variant ? (String(object.properties.variant) as PropVariant) : undefined,
+            objective: hasProperty("objective") ? Boolean(object.properties.objective) : undefined,
+            interactive: hasProperty("interactive")
+              ? Boolean(object.properties.interactive)
+              : undefined,
             interactionId: object.properties.interactionId
               ? String(object.properties.interactionId)
               : undefined,
             interactionLabel: object.properties.interactionLabel
               ? String(object.properties.interactionLabel)
+              : undefined,
+            lootWeaponId: object.properties.lootWeapon
+              ? resolveWeaponId(String(object.properties.lootWeapon))
+              : undefined,
+            lootAmmoType: object.properties.lootAmmoType
+              ? (String(object.properties.lootAmmoType) as AmmoType)
+              : undefined,
+            lootAmmoAmount: object.properties.lootAmmoAmount
+              ? Number(object.properties.lootAmmoAmount)
               : undefined
           })
         );
@@ -573,7 +700,7 @@ export class MissionScene extends Phaser.Scene {
       this.addMissionMarker(() => ({ cell, visible: true }), 0x9cff87)
     );
     this.props
-      .filter((prop) => prop.interactive)
+      .filter((prop) => prop.interactive && prop.kind !== "crate" && prop.kind !== "weapon-drop")
       .forEach((prop) =>
         this.addMissionMarker(
           () => ({
@@ -598,6 +725,10 @@ export class MissionScene extends Phaser.Scene {
   private createEffects(): void {
     this.commandMarker = this.add.image(0, 0, "command-marker").setVisible(false);
     this.commandMarker.setDepth(9999);
+    this.attackMarker = this.add.image(0, 0, "command-marker").setVisible(false);
+    this.attackMarker.setTint(0xff6f6f);
+    this.attackMarker.setScale(1.08);
+    this.attackMarker.setDepth(10000);
     this.dragGraphics = this.add.graphics();
     this.debugGraphics = this.add.graphics();
 
@@ -691,7 +822,7 @@ export class MissionScene extends Phaser.Scene {
           { x: 80, y: 64 },
           { x: 78, y: 58 }
         ],
-        ["rifle", "smg"],
+        ["enemy-carbine", "enemy-needler"],
         "Rapid Response"
       );
     }
@@ -720,7 +851,7 @@ export class MissionScene extends Phaser.Scene {
         { x: 78, y: 46 },
         { x: 80, y: 48 }
       ],
-      ["smg", "rifle"],
+      ["enemy-needler", "enemy-carbine"],
       "Containment Team"
     );
   }
@@ -742,7 +873,7 @@ export class MissionScene extends Phaser.Scene {
         { x: 34, y: 86 },
         { x: 38, y: 88 }
       ],
-      ["smg", "rifle"],
+      ["enemy-suppressor", "enemy-carbine"],
       "Lockdown Team"
     );
   }
@@ -771,7 +902,7 @@ export class MissionScene extends Phaser.Scene {
             { x: 60, y: 44 },
             { x: 67, y: 48 }
           ],
-          ["rifle", "smg"],
+          ["enemy-lancer", "enemy-needler"],
           "Skywatch",
           { rooftop: true }
         );
@@ -782,7 +913,7 @@ export class MissionScene extends Phaser.Scene {
             { x: 58, y: 42 },
             { x: 68, y: 44 }
           ],
-          ["smg", "rifle"],
+          ["enemy-needler", "enemy-lancer"],
           "Roof Hunter",
           { rooftop: true }
         );
@@ -793,7 +924,7 @@ export class MissionScene extends Phaser.Scene {
             { x: 68, y: 40 },
             { x: 82, y: 44 }
           ],
-          ["rifle", "smg"],
+          ["enemy-lancer", "enemy-suppressor"],
           "Catwalk Guard",
           { rooftop: true }
         );
@@ -827,6 +958,11 @@ export class MissionScene extends Phaser.Scene {
         this.interactionOrders.delete(unitId);
       }
     });
+
+    if (this.resolveSupplyInteraction(prop, unit)) {
+      this.refreshSnapshot(true);
+      return;
+    }
 
     const interactionId = prop.interactionId ?? prop.id;
     switch (interactionId) {
@@ -864,6 +1000,63 @@ export class MissionScene extends Phaser.Scene {
     }
 
     this.refreshSnapshot(true);
+  }
+
+  private resolveSupplyInteraction(prop: Prop, unit: Unit): boolean {
+    if (prop.kind === "crate") {
+      const targets = this.selectedUnits.length
+        ? this.selectedUnits.filter((candidate) => candidate.alive)
+        : [unit];
+      let totalAmmo = 0;
+      targets.forEach((target) => {
+        const weapon = target.getActiveWeapon();
+        if (!weapon) {
+          return;
+        }
+
+        totalAmmo += target.addAmmo(weapon.ammoType, weapon.pickupAmmo);
+      });
+      this.announce(
+        `${unit.label} cracked open an ammo crate. Squad recovered ${totalAmmo} rounds across active loadouts.`,
+        "success",
+        true
+      );
+      return true;
+    }
+
+    if (prop.kind === "armory-locker" && prop.lootWeaponId) {
+      const weapon = WEAPONS[prop.lootWeaponId];
+      unit.equipWeapon(prop.lootWeaponId, prop.lootAmmoAmount || weapon.pickupAmmo);
+      this.announce(
+        `${unit.label} equipped ${weapon.name} from the field armory.`,
+        "success",
+        true
+      );
+      return true;
+    }
+
+    if (prop.kind === "weapon-drop" && prop.lootWeaponId) {
+      const weapon = WEAPONS[prop.lootWeaponId];
+      const nextAmmo = prop.lootAmmoAmount || weapon.dropAmmo;
+      if (unit.weaponId === prop.lootWeaponId) {
+        unit.addAmmo(weapon.ammoType, nextAmmo);
+        this.announce(
+          `${unit.label} recovered ${nextAmmo} rounds for ${weapon.name}.`,
+          "success",
+          true
+        );
+      } else {
+        unit.equipWeapon(prop.lootWeaponId, nextAmmo);
+        this.announce(
+          `${unit.label} recovered ${weapon.name} and ${nextAmmo} rounds from the scene.`,
+          "success",
+          true
+        );
+      }
+      return true;
+    }
+
+    return false;
   }
 
   private addExtractionCell(cell: GridPos): void {
@@ -946,12 +1139,8 @@ export class MissionScene extends Phaser.Scene {
   ): void {
     cells.forEach((cell, index) => {
       const weaponId = weapons[index % weapons.length];
-      const textureKey =
-        weaponId === "shotgun"
-          ? "unit-enemy-shotgun"
-          : weaponId === "smg"
-            ? "unit-enemy-smg"
-            : "unit-enemy-rifle";
+      const profile = getEnemyProfileForWeapon(weaponId);
+      const textureKey = getEnemyTextureForWeapon(weaponId);
       const spawnCell = this.map.findNearestOpen(cell, (x, y) =>
         this.isWalkableForUnit(
           {
@@ -970,11 +1159,11 @@ export class MissionScene extends Phaser.Scene {
         role: "enemy",
         weaponId,
         cell: spawnCell,
-        maxHealth: weaponId === "rifle" ? 70 : 64,
-        armor: weaponId === "rifle" ? 2 : 1,
-        accuracy: (weaponId === "rifle" ? 0.76 : 0.72) + (options?.rooftop ? 0.05 : 0),
-        moveSpeed: 184,
-        vision: 6.6 + (options?.rooftop ? 0.8 : 0),
+        maxHealth: profile.maxHealth,
+        armor: profile.armor,
+        accuracy: profile.accuracy + (options?.rooftop ? 0.05 : 0),
+        moveSpeed: profile.moveSpeed,
+        vision: profile.vision + (options?.rooftop ? 0.8 : 0),
         textureKey,
         medkits: 0,
         rangeBonus: options?.rooftop ? 0.75 : 0,
@@ -989,76 +1178,88 @@ export class MissionScene extends Phaser.Scene {
 
   private createInput(): void {
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      const camera = this.cameras.main;
-      const world = pointer.positionToCamera(camera) as Phaser.Math.Vector2;
-
       if (pointer.button === 0) {
         this.dragStart = new Phaser.Math.Vector2(pointer.x, pointer.y);
+        this.dragMode = "primary";
         this.dragGraphics.clear();
         return;
       }
 
       if (pointer.button === 2) {
-        this.handleRightClick(world);
+        this.dragStart = new Phaser.Math.Vector2(pointer.x, pointer.y);
+        this.dragMode = "secondary";
+        this.dragGraphics.clear();
       }
     });
 
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
-      if (!this.dragStart || !pointer.isDown) {
+      if (!this.dragStart || !this.dragMode || !pointer.isDown) {
         return;
       }
 
-      this.dragGraphics.clear();
-      this.dragGraphics.lineStyle(2, 0x7de1ff, 0.9);
-      this.dragGraphics.fillStyle(0x59dfff, 0.1);
-      const rect = new Phaser.Geom.Rectangle(
-        Math.min(this.dragStart.x, pointer.x),
-        Math.min(this.dragStart.y, pointer.y),
-        Math.abs(pointer.x - this.dragStart.x),
-        Math.abs(pointer.y - this.dragStart.y)
-      );
-      this.dragGraphics.fillRectShape(rect);
-      this.dragGraphics.strokeRectShape(rect);
+      const dragDistance = this.getPointerDragDistance(pointer);
+
+      if (this.dragMode === "primary") {
+        if (dragDistance >= PRIMARY_CAMERA_DRAG_THRESHOLD) {
+          this.dragMode = "camera";
+          this.cameraController.beginPointerDrag(this.dragStart.x, this.dragStart.y);
+        } else {
+          this.dragGraphics.clear();
+          return;
+        }
+      }
+
+      if (this.dragMode === "secondary") {
+        if (dragDistance < POINTER_DRAG_THRESHOLD || !this.configData.campaign.settings.edgeScroll) {
+          return;
+        }
+
+        this.dragMode = "camera";
+        this.cameraController.beginPointerDrag(this.dragStart.x, this.dragStart.y);
+      }
+
+      if (this.dragMode === "camera") {
+        this.cameraController.dragPointerTo(pointer.x, pointer.y);
+        return;
+      }
     });
 
     this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
-      if (!this.dragStart) {
+      if (!this.dragStart || !this.dragMode) {
         return;
       }
 
-      const dragDistance = Phaser.Math.Distance.Between(
-        this.dragStart.x,
-        this.dragStart.y,
-        pointer.x,
-        pointer.y
-      );
+      const world = pointer.positionToCamera(this.cameras.main) as Phaser.Math.Vector2;
+      const dragDistance = this.getPointerDragDistance(pointer);
+      let commandIssued = false;
+      let action = "none";
 
-      if (dragDistance < 8) {
-        const world = pointer.positionToCamera(this.cameras.main) as Phaser.Math.Vector2;
-        const clickedPlayer = this.getHoveredPlayerAtWorld(world.x, world.y);
-        this.selectUnits(clickedPlayer ? [clickedPlayer] : []);
-      } else {
-        const rect = new Phaser.Geom.Rectangle(
-          Math.min(this.dragStart.x, pointer.x),
-          Math.min(this.dragStart.y, pointer.y),
-          Math.abs(pointer.x - this.dragStart.x),
-          Math.abs(pointer.y - this.dragStart.y)
-        );
-        const selected = this.playerUnits.filter((unit) => {
-          if (!unit.alive) {
-            return false;
-          }
-          if (unit.controlMode !== "manual") {
-            return false;
-          }
-          const screen = this.worldToScreen(unit.getWorldPosition());
-          return rect.contains(screen.x, screen.y);
-        });
-        this.selectUnits(selected);
+      if (this.dragMode === "primary") {
+        if (dragDistance < POINTER_DRAG_THRESHOLD) {
+          const result = this.handlePrimaryClick(pointer, world);
+          commandIssued = result.commandIssued;
+          action = result.action;
+        }
+      } else if (this.dragMode === "camera") {
+        action = "camera-pan";
+      } else if (this.dragMode === "secondary") {
+        if (dragDistance < POINTER_DRAG_THRESHOLD) {
+          const result = this.handleSecondaryClick(world);
+          commandIssued = result.commandIssued;
+          action = result.action;
+        } else {
+          action = "camera-pan";
+        }
       }
 
-      this.dragStart = null;
-      this.dragGraphics.clear();
+      this.lastPointerGesture = {
+        mode: this.dragMode,
+        distance: Math.round(dragDistance),
+        commandIssued,
+        action
+      };
+
+      this.clearPointerDragState();
     });
   }
 
@@ -1123,15 +1324,19 @@ export class MissionScene extends Phaser.Scene {
   }
 
   private createEnemyUnit(object: TiledObjectData, cell: GridPos): Unit {
-    const weaponId = String(object.properties.weapon ?? "rifle") as WeaponId;
-    const textureKey =
-      weaponId === "shotgun"
-        ? "unit-enemy-shotgun"
-        : weaponId === "smg"
-          ? "unit-enemy-smg"
-          : "unit-enemy-rifle";
+    const rawWeaponId = resolveWeaponId(String(object.properties.weapon ?? "enemy-carbine"));
+    const weaponId =
+      rawWeaponId === "assault-rifle"
+        ? "enemy-carbine"
+        : rawWeaponId === "uiz"
+          ? "enemy-needler"
+          : rawWeaponId === "colt"
+            ? "enemy-sidearm"
+            : rawWeaponId;
     const elite = Boolean(object.properties.elite);
     const rooftop = Boolean(object.properties.rooftop);
+    const profile = getEnemyProfileForWeapon(weaponId);
+    const textureKey = getEnemyTextureForWeapon(weaponId);
 
     return new Unit(this, this.map, {
       id: `enemy-${object.id}`,
@@ -1140,11 +1345,11 @@ export class MissionScene extends Phaser.Scene {
       role: "enemy",
       weaponId,
       cell,
-      maxHealth: elite ? 82 : 68,
-      armor: elite ? 3 : 1,
-      accuracy: (elite ? 0.84 : 0.72) + (rooftop ? 0.05 : 0),
-      moveSpeed: elite ? 188 : 176,
-      vision: (elite ? 7 : 6) + (rooftop ? 0.8 : 0),
+      maxHealth: (elite ? profile.maxHealth + 12 : profile.maxHealth),
+      armor: profile.armor + (elite ? 1 : 0),
+      accuracy: profile.accuracy + (elite ? 0.05 : 0) + (rooftop ? 0.05 : 0),
+      moveSpeed: elite ? profile.moveSpeed + 8 : profile.moveSpeed,
+      vision: profile.vision + (elite ? 0.35 : 0) + (rooftop ? 0.8 : 0),
       textureKey,
       medkits: 0,
       patrol: getPatrolPath(object),
@@ -1154,37 +1359,78 @@ export class MissionScene extends Phaser.Scene {
     });
   }
 
-  private handleRightClick(world: Phaser.Math.Vector2): void {
+  private handlePrimaryClick(
+    pointer: Phaser.Input.Pointer,
+    world: Phaser.Math.Vector2
+  ): { action: string; commandIssued: boolean } {
+    const clickedPlayer =
+      this.getHoveredPlayerAtScreen(pointer.x, pointer.y) ??
+      this.getHoveredPlayerAtWorld(world.x, world.y);
+
+    if (clickedPlayer) {
+      if (this.isDoubleClickOnPlayer(clickedPlayer)) {
+        this.selectUnits(this.getVisibleDirectPlayers());
+        return { action: "select-all", commandIssued: false };
+      }
+
+      this.rememberPrimaryClick(clickedPlayer);
+      this.selectUnits([clickedPlayer]);
+      return { action: "select", commandIssued: false };
+    }
+
+    this.resetPrimaryClickTracking();
+
     if (!this.selectedUnits.length) {
-      return;
+      return { action: "none", commandIssued: false };
     }
 
     const cell = this.map.findNearestOpen(this.map.worldToGrid(world.x, world.y), (x, y) =>
       this.isWalkableForUnit(this.selectedUnits[0], x, y)
     );
-    const enemy = this.getHoveredEnemy(world.x, world.y);
+    const enemy =
+      this.getHoveredEnemyAtScreen(pointer.x, pointer.y) ??
+      this.getHoveredEnemy(world.x, world.y);
     const prop = this.getHoveredProp(world.x, world.y);
 
     if (enemy) {
       this.selectedUnits.forEach((unit) => this.issueAttackCommand(unit, enemy));
       this.configData.audio.playSelect();
-      return;
-    }
-
-    if (prop?.canInteract()) {
-      this.issueInteractionCommand(prop);
-      this.configData.audio.playSelect();
-      return;
+      const targetWorld = enemy.getWorldPosition();
+      this.showActionMarker(this.attackMarker, targetWorld.x, targetWorld.y + 6);
+      return { action: "attack", commandIssued: true };
     }
 
     if (prop && (prop.objective || prop.destructible)) {
       this.selectedUnits.forEach((unit) => this.issueAttackCommand(unit, prop));
       this.configData.audio.playSelect();
-      return;
+      this.showActionMarker(this.attackMarker, prop.image.x, prop.image.y + 6);
+      return { action: "attack", commandIssued: true };
     }
 
     this.issueMoveCommand(cell);
     this.configData.audio.playMove();
+    return { action: "move", commandIssued: true };
+  }
+
+  private handleSecondaryClick(world: Phaser.Math.Vector2): { action: string; commandIssued: boolean } {
+    if (!this.selectedUnits.length) {
+      return { action: "none", commandIssued: false };
+    }
+
+    const cell = this.map.findNearestOpen(this.map.worldToGrid(world.x, world.y), (x, y) =>
+      this.isWalkableForUnit(this.selectedUnits[0], x, y)
+    );
+    const prop = this.getHoveredProp(world.x, world.y);
+
+    if (prop?.canInteract()) {
+      this.issueInteractionCommand(prop);
+      this.configData.audio.playSelect();
+      return { action: "interact", commandIssued: true };
+    }
+
+    this.issueMoveCommand(cell);
+    this.configData.audio.playMove();
+    return { action: "move", commandIssued: true };
   }
 
   private issueMoveCommand(targetCell: GridPos): void {
@@ -1208,14 +1454,7 @@ export class MissionScene extends Phaser.Scene {
     });
 
     const world = this.map.gridToWorld(targetCell);
-    this.commandMarker.setPosition(world.x, world.y + 6).setVisible(true);
-    this.commandMarker.alpha = 1;
-    this.tweens.add({
-      targets: this.commandMarker,
-      alpha: 0,
-      duration: 500,
-      onComplete: () => this.commandMarker.setVisible(false)
-    });
+    this.showActionMarker(this.commandMarker, world.x, world.y + 6);
   }
 
   private issueAttackCommand(unit: Unit, target: Unit | Prop): void {
@@ -1426,6 +1665,7 @@ export class MissionScene extends Phaser.Scene {
     }
 
     if (unit.side === "enemy") {
+      this.spawnEnemyLoot(unit);
       this.announce(`${unit.label} neutralized.`, "success", true);
       return;
     }
@@ -1433,6 +1673,35 @@ export class MissionScene extends Phaser.Scene {
     if (unit.side === "civilian") {
       this.announce("Civilian lost in the crossfire.", "warning", true);
     }
+  }
+
+  private spawnEnemyLoot(unit: Unit): void {
+    const bundle = unit.getWeaponLootBundle();
+    if (!bundle) {
+      return;
+    }
+
+    const dropCell = this.map.findNearestOpen(unit.currentCell, (x, y) =>
+      this.map.inBounds(x, y) &&
+      this.map.isPlayableCell(x, y) &&
+      !this.props.some((prop) => !prop.destroyed && prop.isBlocking && prop.cell.x === x && prop.cell.y === y)
+    );
+
+    this.props.push(
+      new Prop(this, this.map, {
+        id: `weapon-drop-${unit.id}`,
+        kind: "weapon-drop",
+        cell: dropCell,
+        blocking: false,
+        cover: false,
+        destructible: false,
+        interactive: true,
+        interactionLabel: `Recover ${WEAPONS[bundle.weaponId].name}`,
+        lootWeaponId: bundle.weaponId,
+        lootAmmoType: bundle.ammoType,
+        lootAmmoAmount: bundle.ammoAmount
+      })
+    );
   }
 
   private handlePropDestroyed(prop: Prop): void {
@@ -1539,6 +1808,42 @@ export class MissionScene extends Phaser.Scene {
     this.refreshSnapshot(true);
   }
 
+  private getPointerDragDistance(pointer: Phaser.Input.Pointer): number {
+    if (!this.dragStart) {
+      return 0;
+    }
+
+    return Phaser.Math.Distance.Between(
+      this.dragStart.x,
+      this.dragStart.y,
+      pointer.x,
+      pointer.y
+    );
+  }
+
+  private clearPointerDragState(): void {
+    this.dragStart = null;
+    this.dragMode = null;
+    this.dragGraphics.clear();
+    this.cameraController.endPointerDrag();
+  }
+
+  private showActionMarker(
+    marker: Phaser.GameObjects.Image,
+    x: number,
+    y: number
+  ): void {
+    marker.setPosition(x, y).setVisible(true);
+    marker.alpha = 1;
+    this.tweens.killTweensOf(marker);
+    this.tweens.add({
+      targets: marker,
+      alpha: 0,
+      duration: 500,
+      onComplete: () => marker.setVisible(false)
+    });
+  }
+
   private getHoveredPlayerAtWorld(worldX: number, worldY: number): Unit | null {
     return (
       this.getDirectControlPlayers().find((unit) => {
@@ -1549,6 +1854,51 @@ export class MissionScene extends Phaser.Scene {
         );
       }) ?? null
     );
+  }
+
+  private getHoveredPlayerAtScreen(screenX: number, screenY: number): Unit | null {
+    return (
+      this.getDirectControlPlayers().find((unit) => {
+        if (!unit.alive) {
+          return false;
+        }
+
+        const screen = this.worldToScreen(unit.getWorldPosition());
+        return Phaser.Math.Distance.Between(screenX, screenY, screen.x, screen.y - 34) <= 46;
+      }) ?? null
+    );
+  }
+
+  private getVisibleDirectPlayers(): Unit[] {
+    const width = this.scale.width;
+    const height = this.scale.height;
+
+    return this.getDirectControlPlayers().filter((unit) => {
+      if (!unit.alive) {
+        return false;
+      }
+
+      const screen = this.worldToScreen(unit.getWorldPosition());
+      return screen.x >= 0 && screen.x <= width && screen.y >= 0 && screen.y <= height;
+    });
+  }
+
+
+  private isDoubleClickOnPlayer(unit: Unit): boolean {
+    return (
+      this.lastPrimaryClickPlayerId === unit.id &&
+      this.time.now - this.lastPrimaryClickTime <= DOUBLE_CLICK_THRESHOLD
+    );
+  }
+
+  private rememberPrimaryClick(unit: Unit): void {
+    this.lastPrimaryClickPlayerId = unit.id;
+    this.lastPrimaryClickTime = this.time.now;
+  }
+
+  private resetPrimaryClickTracking(): void {
+    this.lastPrimaryClickPlayerId = null;
+    this.lastPrimaryClickTime = 0;
   }
 
   private getHoveredEnemy(worldX: number, worldY: number): Unit | null {
@@ -1564,6 +1914,26 @@ export class MissionScene extends Phaser.Scene {
               unit.getWorldPosition().y - 24
             ) <= 36
         ) ?? null
+    );
+  }
+
+  private getHoveredEnemyAtScreen(screenX: number, screenY: number): Unit | null {
+    const cameraZoom = this.cameras.main.zoom;
+
+    return (
+      this.units
+        .filter((unit) => unit.side === "enemy" && unit.alive)
+        .find((unit) => {
+          const screen = this.worldToScreen(unit.getWorldPosition());
+          return (
+            Phaser.Math.Distance.Between(
+              screenX,
+              screenY,
+              screen.x,
+              screen.y - 24 * cameraZoom
+            ) <= 38
+          );
+        }) ?? null
     );
   }
 
@@ -1640,13 +2010,13 @@ export class MissionScene extends Phaser.Scene {
         label: "Response Unit",
         side: "enemy",
         role: "enemy",
-        weaponId: index % 2 === 0 ? "smg" : "rifle",
+        weaponId: index % 2 === 0 ? "enemy-needler" : "enemy-carbine",
         cell,
-        maxHealth: 68,
+        maxHealth: index % 2 === 0 ? 66 : 70,
         armor: 1,
-        accuracy: 0.74,
-        moveSpeed: 182,
-        vision: 6.5,
+        accuracy: index % 2 === 0 ? 0.72 : 0.78,
+        moveSpeed: index % 2 === 0 ? 182 : 176,
+        vision: 6.6,
         textureKey: index % 2 === 0 ? "unit-enemy-smg" : "unit-enemy-rifle",
         medkits: 0
       });
@@ -1682,6 +2052,15 @@ export class MissionScene extends Phaser.Scene {
       accumulator.x / alive.length,
       accumulator.y / alive.length
     );
+  }
+
+  private getOpeningCameraTarget(): Phaser.Math.Vector2 {
+    const focusCell = MISSIONS[this.configData.missionId].openingFocusCell;
+    if (!focusCell) {
+      return this.getSquadCentroid();
+    }
+
+    return this.map.gridToWorld(focusCell);
   }
 
   private centerCameraOn(world: Phaser.Math.Vector2): void {
@@ -1782,10 +2161,6 @@ export class MissionScene extends Phaser.Scene {
 
   private getDirectControlPlayers(): Unit[] {
     return this.playerUnits.filter((unit) => unit.controlMode === "manual");
-  }
-
-  private getAssistPlayers(): Unit[] {
-    return this.playerUnits.filter((unit) => unit.controlMode === "assist");
   }
 
   private findUnitPath(unit: Unit, target: GridPos): GridPos[] {

@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import type { GridPos } from "../core/missionTypes";
+import type { AmmoType, WeaponId } from "../data/types";
 import { IsoMap } from "../systems/IsoMap";
 
 export type PropKind =
@@ -15,12 +16,25 @@ export type PropKind =
   | "skylight"
   | "uplink"
   | "stairwell"
-  | "billboard";
+  | "billboard"
+  | "facade-wall"
+  | "facade-corner"
+  | "checkpoint"
+  | "streetlight"
+  | "fence"
+  | "pipe-bank"
+  | "support-tower"
+  | "tank-cluster"
+  | "armory-locker"
+  | "weapon-drop";
+
+export type PropVariant = "diag-left" | "diag-right";
 
 export interface PropConfig {
   id: string;
   kind: PropKind;
   cell: GridPos;
+  variant?: PropVariant;
   blocking?: boolean;
   destructible?: boolean;
   cover?: boolean;
@@ -28,6 +42,9 @@ export interface PropConfig {
   interactive?: boolean;
   interactionId?: string;
   interactionLabel?: string;
+  lootWeaponId?: WeaponId;
+  lootAmmoType?: AmmoType;
+  lootAmmoAmount?: number;
   hp?: number;
 }
 
@@ -44,7 +61,37 @@ const TEXTURE_BY_KIND: Record<PropKind, string> = {
   skylight: "prop-skylight",
   uplink: "prop-uplink",
   stairwell: "prop-stairwell",
-  billboard: "prop-billboard"
+  billboard: "prop-billboard",
+  "facade-wall": "prop-facade-wall",
+  "facade-corner": "prop-facade-corner",
+  checkpoint: "prop-checkpoint",
+  streetlight: "prop-streetlight",
+  fence: "prop-fence",
+  "pipe-bank": "prop-pipe-bank",
+  "support-tower": "prop-support-tower",
+  "tank-cluster": "prop-tank-cluster",
+  "armory-locker": "prop-armory-locker",
+  "weapon-drop": "prop-weapon-drop"
+};
+
+const resolveTextureKey = (kind: PropKind, variant?: PropVariant): string => {
+  if (kind === "facade-wall") {
+    return variant === "diag-left" ? "prop-facade-wall-diag-left" : "prop-facade-wall-diag-right";
+  }
+
+  if (kind === "facade-corner") {
+    return "prop-facade-wall-diag-right";
+  }
+
+  if (kind === "fence") {
+    if (variant === "diag-left") {
+      return "prop-fence-diag-left";
+    }
+
+    return "prop-fence-diag-right";
+  }
+
+  return TEXTURE_BY_KIND[kind];
 };
 
 const HEIGHT_OFFSET: Record<PropKind, number> = {
@@ -60,7 +107,17 @@ const HEIGHT_OFFSET: Record<PropKind, number> = {
   skylight: 28,
   uplink: 86,
   stairwell: 84,
-  billboard: 116
+  billboard: 116,
+  "facade-wall": 248,
+  "facade-corner": 268,
+  checkpoint: 92,
+  streetlight: 156,
+  fence: 148,
+  "pipe-bank": 74,
+  "support-tower": 172,
+  "tank-cluster": 154,
+  "armory-locker": 96,
+  "weapon-drop": 16
 };
 
 export class Prop {
@@ -69,6 +126,8 @@ export class Prop {
   public readonly kind: PropKind;
 
   public readonly cell: GridPos;
+
+  public readonly variant: PropVariant | null;
 
   public readonly blocking: boolean;
 
@@ -83,6 +142,12 @@ export class Prop {
   public readonly interactionId: string | null;
 
   public readonly interactionLabel: string | null;
+
+  public readonly lootWeaponId: WeaponId | null;
+
+  public readonly lootAmmoType: AmmoType | null;
+
+  public readonly lootAmmoAmount: number;
 
   public readonly level: number;
 
@@ -106,6 +171,7 @@ export class Prop {
     this.id = config.id;
     this.kind = config.kind;
     this.cell = config.cell;
+    this.variant = config.variant ?? null;
     this.blocking =
       config.blocking ??
       [
@@ -120,28 +186,77 @@ export class Prop {
         "skylight",
         "uplink",
         "stairwell",
-        "billboard"
+        "billboard",
+        "facade-wall",
+        "facade-corner",
+        "fence",
+        "pipe-bank",
+        "support-tower",
+        "tank-cluster",
+        "armory-locker"
       ].includes(config.kind);
-    this.cover = config.cover ?? ["barrier", "crate", "vehicle", "terminal", "hvac", "stairwell", "billboard"].includes(config.kind);
-    this.destructible = config.destructible ?? ["crate", "barrel", "glass", "skylight"].includes(config.kind);
+    this.cover =
+      config.cover ??
+      [
+        "barrier",
+        "crate",
+        "vehicle",
+        "terminal",
+        "hvac",
+        "stairwell",
+        "billboard",
+        "facade-wall",
+        "facade-corner",
+        "fence",
+        "pipe-bank",
+        "support-tower",
+        "tank-cluster",
+        "armory-locker"
+      ].includes(config.kind);
+    this.destructible =
+      config.destructible ?? ["crate", "barrel", "glass", "skylight"].includes(config.kind);
     this.objective = config.objective ?? false;
-    this.interactive = config.interactive ?? false;
+    this.interactive =
+      config.interactive ?? ["crate", "armory-locker", "weapon-drop"].includes(config.kind);
     this.interactionId = config.interactionId ?? null;
-    this.interactionLabel = config.interactionLabel ?? null;
+    this.interactionLabel =
+      config.interactionLabel ??
+      (config.kind === "crate"
+        ? "Open ammo crate"
+        : config.kind === "armory-locker"
+          ? "Access field armory"
+          : config.kind === "weapon-drop"
+            ? "Recover dropped weapon"
+            : null);
+    this.lootWeaponId = config.lootWeaponId ?? null;
+    this.lootAmmoType = config.lootAmmoType ?? null;
+    this.lootAmmoAmount = config.lootAmmoAmount ?? 0;
     this.maxHealth =
       config.hp ??
       (config.kind === "barrel"
-        ? 36
-        : config.kind === "glass" || config.kind === "skylight"
-          ? 18
-          : config.kind === "billboard"
+          ? 36
+          : config.kind === "glass" || config.kind === "skylight"
+            ? 18
+            : config.kind === "fence"
+              ? 64
+              : config.kind === "pipe-bank"
+                ? 132
+                : config.kind === "support-tower" || config.kind === "tank-cluster"
+                  ? 148
+          : config.kind === "billboard" ||
+              config.kind === "checkpoint" ||
+              config.kind === "armory-locker"
             ? 74
-            : 52);
+            : config.kind === "facade-wall" || config.kind === "facade-corner"
+              ? 96
+              : config.kind === "weapon-drop"
+                ? 1
+                : 52);
     this.currentHealth = this.maxHealth;
     this.level = map.getElevationAt(this.cell.x, this.cell.y);
 
     const world = map.gridToWorld(this.cell);
-    this.image = scene.add.image(world.x, world.y + 8, TEXTURE_BY_KIND[this.kind]);
+    this.image = scene.add.image(world.x, world.y + 8, resolveTextureKey(this.kind, this.variant ?? undefined));
     this.image.setOrigin(0.5, 1);
     this.image.setDepth(world.y + HEIGHT_OFFSET[this.kind]);
     this.baseY = world.y + 8;
@@ -201,7 +316,14 @@ export class Prop {
   public setFloorVisibility(focusFloor: number): void {
     const delta = this.level - focusFloor;
     if (delta > 0) {
-      this.floorAlpha = this.kind === "billboard" ? 0.2 : 0.16;
+      this.floorAlpha =
+        this.kind === "billboard"
+          ? 0.3
+          : ["fence", "pipe-bank", "support-tower", "tank-cluster", "facade-wall", "facade-corner"].includes(
+                this.kind
+              )
+            ? 0.54
+            : 0.36;
     } else if (delta < 0) {
       this.floorAlpha = this.kind === "billboard" ? 0.55 : 0.62;
     } else {
